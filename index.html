@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QueryBench - The Enterprise SQL Assessment Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://esm.sh/@xyflow/react@12.0.0/dist/style.css" />
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        code, pre, textarea { font-family: 'JetBrains Mono', monospace; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(229, 231, 235, 0.5);
+        }
+        /* Custom scrollbar for dark editor */
+        .cm-editor {
+            height: 100% !important;
+            font-size: 16px !important;
+        }
+        .cm-scroller::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .cm-scroller::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        .cm-scroller::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        .cm-scroller::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+        /* React Flow Customization */
+        .react-flow__node-table {
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            background: white;
+            min-width: 200px;
+            font-family: 'JetBrains Mono', monospace;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+        .react-flow__node-table.selected {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px #bfdbfe;
+        }
+        .react-flow__handle {
+            width: 6px;
+            height: 6px;
+            background: #94a3b8;
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react/": "https://esm.sh/react@18.2.0/",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/": "https://esm.sh/react-dom@18.2.0/",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "lucide-react": "https://esm.sh/lucide-react@0.294.0",
+    "@uiw/react-codemirror": "https://esm.sh/@uiw/react-codemirror@4.21.21?external=react,react-dom",
+    "@codemirror/lang-sql": "https://esm.sh/@codemirror/lang-sql@6.5.5",
+    "@xyflow/react": "https://esm.sh/@xyflow/react@12.0.0?external=react,react-dom",
+    "dagre": "https://esm.sh/dagre@0.8.5"
+  }
+}
+</script>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+    <div id="root"></div>
+</body>
+</html>
