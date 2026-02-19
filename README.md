@@ -1,53 +1,86 @@
-# QueryBench - The Enterprise SQL Assessment Platform
+# QueryBench - Enterprise SQL Assessment Platform
 
-A high-performance SQL assessment platform designed for internal organizational use.
+QueryBench is a high-performance, internal-only platform designed for assessing technical SQL proficiency. It combines a robust Django/DRF backend with a high-fidelity React workspace, featuring real-time schema visualization and secure query execution.
 
-## Local Setup
+## 🏗️ Architecture Overview
 
-### 1. Requirements
-- Python 3.11+
-- Node.js 18+ (for frontend development)
-- SQL Server (Application & Assessment DBs)
+QueryBench operates on a **Two-Tier Database Model**:
+1.  **Management DB (SQLite/PostgreSQL)**: Stores users, assessments, assignments, and scores. Managed by Django.
+2.  **Target Assessment DBs (SQL Server/Postgres)**: External databases where participant queries are actually executed. These are treated as read-only "targets."
 
-### 2. Application Database Setup (SQL Server)
-Before running the backend, initialize your SQL Server instance with the master schema:
-1. Open SQL Server Management Studio (SSMS) or Azure Data Studio.
-2. Execute the script located at `backend/schema.sql`.
-3. Ensure the SQL user configured in `.env` has `db_owner` permissions on the `QueryBench` database.
+## 🚀 Local Setup
 
-### 3. Backend Installation
+### 1. Prerequisites
+- **Python 3.11+**
+- **Node.js 18+**
+- **ODBC Driver 17 for SQL Server** (Required for the `pyodbc` execution engine)
+- **SQL Server Instance** (For the target databases)
+
+### 2. Backend Installation (Django)
 ```bash
-pip install django djangorestframework psycopg2-binary pyodbc django-auth-adfs
-# Configure .env
-cp .env.example .env
+# Install dependencies
+pip install django djangorestframework django-cors-headers pyodbc
+
+# Setup Environment
+cp .env.example .env  # Update with your SQL Server credentials
+
+# Initialize Management DB
 python manage.py migrate
 python manage.py createsuperuser
-python manage.py runserver 8080
+
+# Start Server
+python manage.py runserver 8000
 ```
 
-### 4. Frontend Installation
+### 3. Frontend Installation (Vite/React)
 ```bash
+# Install dependencies
 npm install
+
+# Start Development Server
 npm run dev
 ```
 
-## Microsoft Authentication (Azure Entra ID)
-The platform is pre-configured to support Microsoft SSO. 
+## 🛡️ Security & Evaluation Engine
 
-### Azure Setup:
-1. Register an App in **Azure Entra ID**.
-2. Set **Redirect URI** to `https://<your-domain>/auth/callback`.
-3. Update environment variables (`AZURE_TENANT_ID`, etc).
+The platform implements a multi-layer "Lexical & Runtime Guardian" to protect internal infrastructure:
 
-## Security Design Decisions
-- **SSO Integration**: Uses OIDC via Azure Entra ID.
-- **Master-Target Isolation**: The "Application DB" (where scores are) is physically separate from the "Assessment DB" (where raw data for queries is).
-- **Lexical Validator**: Rejects any query containing keywords like `DROP`, `UPDATE`, `EXEC`, or `TRUNCATE`.
-- **Row Limit**: Results are truncated at 5,000 rows.
+### Lexical Validation
+Every query submitted (by Admin or Participant) is scanned for banned DDL/DML tokens. 
+**Banned Tokens**: `DROP`, `DELETE`, `UPDATE`, `INSERT`, `TRUNCATE`, `ALTER`, `EXEC`, `MERGE`, `GRANT`, `REVOKE`.
 
-## Configuration
-Update these variables in your `.env`:
-- `DATABASE_URL`: Connection for QueryBench (App DB).
-- `ASSESSMENT_DB_CONNECTION`: Default connection for evaluation.
-- `SQL_TIMEOUT`: 5
-- `MAX_ROWS`: 5000
+### Determinism Enforcement
+To ensure fair scoring, all queries **must** include an `ORDER BY` clause. The engine uses a `TOP (100)` rewrite strategy; without deterministic sorting, result set comparisons would be unstable.
+
+### Row Capping & Timeouts
+- **Result Limit**: Max 100 rows per execution to prevent memory exhaustion.
+- **Query Timeout**: 5-second hard limit on the database driver level.
+- **Concurrency**: Managed via a global semaphore (`MAX_CONCURRENT_QUERY_RUNS`).
+
+## 🎨 Key Features
+
+- **Resizable Workspace**: Grab the handles between the Sidebar, Code Editor, and Results grid to customize your view.
+- **Schema Explorer**: 
+  - **Metadata List**: Searchable list of tables and columns.
+  - **ERD Diagram**: Interactive visual relationship map powered by `@xyflow/react` and `dagre`.
+- **Admin Suite**:
+  - **Question Library**: Master repository of "Gold Standard" queries.
+  - **Infrastructure Targets**: Manage connection strings for different internal database environments.
+  - **Bulk Operations**: Import questions via CSV or assign assessments to lists of emails.
+
+## 📁 Project Structure
+
+```text
+├── api/                # Django REST API (Models, Serializers, Views)
+├── backend/            # SQL Execution Engine (Runner, Router, Governor)
+├── components/         # React UI Library
+│   ├── admin/          # Admin Dashboard & Management Tabs
+│   ├── ui/             # Reusable Design System (Modals, Inputs)
+│   └── AssessmentView.tsx # Main Participant Workspace
+├── querybench/         # Django Project Configuration
+├── types.ts            # Shared TypeScript Interfaces
+└── App.tsx             # Frontend Routing & State
+```
+
+## 🔒 Internal Use Only
+This application is designed for deployment within a corporate VPN. Ensure that the `ASSESSMENT_DB_CONNECTION` in your `.env` points to a non-production, read-only replica of your data.
