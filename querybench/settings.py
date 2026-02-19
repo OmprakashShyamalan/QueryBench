@@ -1,14 +1,17 @@
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-mvp-key-12345')
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-enterprise-key-99887766')
 
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -53,12 +56,30 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'querybench.wsgi.application'
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# Database Configuration: Defaults to SQLite if DB_NAME is not provided
+DB_NAME = os.getenv('DB_NAME')
+if DB_NAME:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'mssql',
+            'NAME': DB_NAME,
+            'USER': os.getenv('DB_USER'),
+            'PASSWORD': os.getenv('DB_PASSWORD'),
+            'HOST': os.getenv('DB_HOST', 'localhost'),
+            'PORT': os.getenv('DB_PORT', '1433'),
+            'OPTIONS': {
+                'driver': 'ODBC Driver 17 for SQL Server',
+                'connection_timeout': 30,
+            },
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -85,4 +106,5 @@ REST_FRAMEWORK = {
     ],
 }
 
-CORS_ALLOW_ALL_ORIGINS = True # For MVP Development
+CORS_ALLOW_ALL_ORIGINS = DEBUG # Only allow all in development
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')

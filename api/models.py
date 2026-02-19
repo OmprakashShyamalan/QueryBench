@@ -55,7 +55,7 @@ class AssessmentQuestion(models.Model):
     assessment = models.ForeignKey(Assessment, on_delete=models.CASCADE)
     question = models.ForeignKey(Question, on_delete=models.CASCADE)
     sort_order = models.IntegerField(default=0)
-    weight = models.DecimalField(max_digits=5, decimal_length=2, default=1.0)
+    weight = models.DecimalField(max_digits=5, decimal_places=2, default=1.0)
 
     class Meta:
         unique_together = ('assessment', 'question')
@@ -78,7 +78,7 @@ class Attempt(models.Model):
     assignment = models.ForeignKey(Assignment, on_delete=models.CASCADE, related_name='attempts')
     started_at = models.DateTimeField(auto_now_add=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
-    score = models.DecimalField(max_digits=5, decimal_length=2, null=True, blank=True)
+    score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     review_notes = models.TextField(blank=True)
 
 class AttemptAnswer(models.Model):
