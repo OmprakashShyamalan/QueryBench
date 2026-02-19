@@ -2,85 +2,98 @@
 
 QueryBench is a high-performance, internal-only platform designed for assessing technical SQL proficiency. It combines a robust Django/DRF backend with a high-fidelity React workspace, featuring real-time schema visualization and secure query execution.
 
-## 🏗️ Architecture Overview
+## 🏗️ Project Structure
 
-QueryBench operates on a **Two-Tier Database Model**:
-1.  **Management DB (SQLite/PostgreSQL)**: Stores users, assessments, assignments, and scores. Managed by Django.
-2.  **Target Assessment DBs (SQL Server/Postgres)**: External databases where participant queries are actually executed. These are treated as read-only "targets."
+```text
+QueryBench/
+├── manage.py              # Django management script (Root)
+├── .env                   # Environment variables (Internal Config)
+├── requirements.txt       # Python dependencies
+├── index.html             # Frontend entry point
+├── App.tsx                # Main React Application
+├── types.ts               # Shared TypeScript interfaces
+│
+├── querybench/            # Django Core Project Folder
+│   ├── settings.py        # System configuration
+│   └── urls.py            # Global routing
+│
+├── api/                   # Django REST App
+│   ├── models.py          # ORM for Management DB
+│   └── views.py           # API endpoints (Evaluation/Execution)
+│
+├── backend/               # SQL Execution Engine & Database Assets
+│   ├── runner.py          # SQL Server / Postgres Execution Logic
+│   ├── schema.sql         # Master DDL for Management DB
+│   └── db_router.py       # High-availability routing
+│
+└── components/            # React UI Library
+    ├── AssessmentView.tsx # Participant workspace
+    └── admin/             # Admin management suite
+```
 
 ## 🚀 Local Setup
 
-### 1. Prerequisites
-- **Python 3.11+**
-- **Node.js 18+**
-- **ODBC Driver 17 for SQL Server** (Required for the `pyodbc` execution engine)
-- **SQL Server Instance** (For the target databases)
+### 1. Backend Installation (Django)
+The backend manages users, assessments, and acts as a secure gateway to your target database instances.
 
-### 2. Backend Installation (Django)
 ```bash
+# Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
 # Install dependencies
-pip install django djangorestframework django-cors-headers pyodbc
+pip install -r requirements.txt
 
-# Setup Environment
-cp .env.example .env  # Update with your SQL Server credentials
-
-# Initialize Management DB
+# Initialize Management Database (SQLite by default)
 python manage.py migrate
+
+# Create an admin account for the dashboard
 python manage.py createsuperuser
 
-# Start Server
-python manage.py runserver 8000
+# Start the API server on port 8080
+python manage.py runserver 8080
 ```
 
-### 3. Frontend Installation (Vite/React)
+### 2. Frontend Installation (React/Vite)
+The frontend provides a rich, resizable SQL workspace with ERD visualization.
+
 ```bash
-# Install dependencies
+# Install Node dependencies
 npm install
 
-# Start Development Server
+# Start the development server (configured for port 3000)
 npm run dev
 ```
 
 ## 🛡️ Security & Evaluation Engine
 
-The platform implements a multi-layer "Lexical & Runtime Guardian" to protect internal infrastructure:
+QueryBench implements a multi-layer "Lexical & Runtime Guardian" to protect internal infrastructure:
 
-### Lexical Validation
-Every query submitted (by Admin or Participant) is scanned for banned DDL/DML tokens. 
-**Banned Tokens**: `DROP`, `DELETE`, `UPDATE`, `INSERT`, `TRUNCATE`, `ALTER`, `EXEC`, `MERGE`, `GRANT`, `REVOKE`.
+- **Lexical Validation**: Scans all queries for banned DDL/DML tokens (`DROP`, `DELETE`, `TRUNCATE`, etc.).
+- **Determinism Enforcement**: All queries **must** include an `ORDER BY` clause to ensure fair scoring during result-set comparison.
+- **Row Capping**: All result sets are automatically capped at 100 rows using `TOP (100)` or `LIMIT 100` rewrites.
+- **Execution Timeout**: A hard 5-second limit is enforced at the driver level for all participant queries.
 
-### Determinism Enforcement
-To ensure fair scoring, all queries **must** include an `ORDER BY` clause. The engine uses a `TOP (100)` rewrite strategy; without deterministic sorting, result set comparisons would be unstable.
+## 🛠️ Troubleshooting
 
-### Row Capping & Timeouts
-- **Result Limit**: Max 100 rows per execution to prevent memory exhaustion.
-- **Query Timeout**: 5-second hard limit on the database driver level.
-- **Concurrency**: Managed via a global semaphore (`MAX_CONCURRENT_QUERY_RUNS`).
+### SQL Server ODBC Driver Issues
+QueryBench uses `pyodbc` to connect to internal SQL Server instances. You must have the Microsoft ODBC Driver installed on your host machine.
+- **Windows**: Install [Microsoft ODBC Driver 17/18 for SQL Server](https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server).
+- **Linux**: Install the `msodbcsql17` or `msodbcsql18` package.
 
-## 🎨 Key Features
+### Database Connection Issues
+- Ensure your `ASSESSMENT_DB_PRIMARY_CONN` in `.env` uses the correct driver name (e.g., `{ODBC Driver 17 for SQL Server}`).
+- Verify that the database server is reachable from your local machine (check VPN/Firewall settings).
 
-- **Resizable Workspace**: Grab the handles between the Sidebar, Code Editor, and Results grid to customize your view.
-- **Schema Explorer**: 
-  - **Metadata List**: Searchable list of tables and columns.
-  - **ERD Diagram**: Interactive visual relationship map powered by `@xyflow/react` and `dagre`.
-- **Admin Suite**:
-  - **Question Library**: Master repository of "Gold Standard" queries.
-  - **Infrastructure Targets**: Manage connection strings for different internal database environments.
-  - **Bulk Operations**: Import questions via CSV or assign assessments to lists of emails.
+### Port Conflicts
+- **Backend (8080)**: If port 8080 is in use, run `python manage.py runserver 8081` and update the `VITE_API_URL` in your frontend config.
+- **Frontend (3000)**: If port 3000 is occupied, Vite will attempt to use the next available port. Check the terminal output for the active URL.
 
-## 📁 Project Structure
-
-```text
-├── api/                # Django REST API (Models, Serializers, Views)
-├── backend/            # SQL Execution Engine (Runner, Router, Governor)
-├── components/         # React UI Library
-│   ├── admin/          # Admin Dashboard & Management Tabs
-│   ├── ui/             # Reusable Design System (Modals, Inputs)
-│   └── AssessmentView.tsx # Main Participant Workspace
-├── querybench/         # Django Project Configuration
-├── types.ts            # Shared TypeScript Interfaces
-└── App.tsx             # Frontend Routing & State
-```
+### Missing Environment Variables
+If the server fails to start, ensure your `.env` file contains:
+- `DJANGO_SECRET_KEY`
+- `ASSESSMENT_DB_PRIMARY_CONN`
+- `DATABASE_URL` (if not using default SQLite)
 
 ## 🔒 Internal Use Only
-This application is designed for deployment within a corporate VPN. Ensure that the `ASSESSMENT_DB_CONNECTION` in your `.env` points to a non-production, read-only replica of your data.
+This application is designed for deployment within a corporate VPN. It should never be exposed directly to the public internet. Ensure that your target database connections use read-only credentials with limited schema access.
