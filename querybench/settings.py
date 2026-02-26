@@ -56,23 +56,34 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'querybench.wsgi.application'
 
-# Database Configuration: Defaults to SQLite if DB_NAME is not provided
+# Database Configuration: Defaults to SQLite if DB_NAME is not provided.
+# Set DB_NAME (and optionally DB_USER/DB_PASSWORD) in .env to use SQL Server.
+# If DB_USER is omitted, Windows Authentication (Trusted_Connection) is used instead.
 DB_NAME = os.getenv('DB_NAME')
 if DB_NAME:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'mssql',
-            'NAME': DB_NAME,
-            'USER': os.getenv('DB_USER'),
-            'PASSWORD': os.getenv('DB_PASSWORD'),
-            'HOST': os.getenv('DB_HOST', 'localhost'),
-            'PORT': os.getenv('DB_PORT', '1433'),
-            'OPTIONS': {
-                'driver': 'ODBC Driver 17 for SQL Server',
-                'connection_timeout': 30,
-            },
-        }
+    _db_user = os.getenv('DB_USER', '')
+    _db_password = os.getenv('DB_PASSWORD', '')
+    _db_port = os.getenv('DB_PORT', '')          # Empty = let SQL Server Browser resolve (needed for named instances)
+    _use_sql_auth = bool(_db_user)
+
+    _db_config = {
+        'ENGINE': 'mssql',
+        'NAME': DB_NAME,
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'USER': _db_user if _use_sql_auth else '',
+        'PASSWORD': _db_password if _use_sql_auth else '',
+        'OPTIONS': {
+            'driver': 'ODBC Driver 17 for SQL Server',
+            'connection_timeout': 30,
+            'Trusted_Connection': 'no' if _use_sql_auth else 'yes',
+        },
     }
+    # Only include PORT when explicitly set — named instances (e.g. localhost\SQLEXPRESS)
+    # resolve their port via SQL Server Browser; forcing 1433 will fail.
+    if _db_port:
+        _db_config['PORT'] = _db_port
+
+    DATABASES = {'default': _db_config}
 else:
     DATABASES = {
         'default': {
@@ -106,5 +117,10 @@ REST_FRAMEWORK = {
     ],
 }
 
-CORS_ALLOW_ALL_ORIGINS = DEBUG # Only allow all in development
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all in development
 CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
+CORS_ALLOW_CREDENTIALS = True
+
+CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000').split(',')
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = 'Lax'

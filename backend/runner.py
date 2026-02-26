@@ -94,18 +94,23 @@ def normalize_value(val: Any) -> Any:
         return val.strip()
     return val
 
-def execute_query(query: str, user_id: str = "system") -> Tuple[Optional[List[Dict[str, Any]]], Optional[str], float]:
+def execute_query(query: str, user_id: str = "system", conn_str: Optional[str] = None) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str], float]:
     """
     Safely executes query on SQL Server with TOP 100 rewrite, timeout, and concurrency control.
+
+    If conn_str is provided, connects to that database directly instead of using the router.
     """
     start_time = time.time()
-    
+
     # 1. Enforce App-wide concurrency cap
     with query_semaphore:
         conn = None
         try:
-            # Router handles load balancing across replicas/primary
-            conn = db_router.get_connection()
+            if conn_str:
+                conn = pyodbc.connect(conn_str, timeout=2)
+            else:
+                # Router handles load balancing across replicas/primary
+                conn = db_router.get_connection()
             cursor = conn.cursor()
             
             # Configure statement-level timeout if supported by driver, 
@@ -145,17 +150,23 @@ def execute_query(query: str, user_id: str = "system") -> Tuple[Optional[List[Di
             # Sanitize error to avoid leaking internals
             if "timeout" in err_msg.lower():
                 display_msg = "Query execution timed out. Limit your query's complexity or check for missing joins."
+            elif "invalid object name" in err_msg.lower() or "does not exist" in err_msg.lower():
+                display_msg = "Table or column not found. Check the Explorer tab to see available tables and columns."
+            elif "syntax error" in err_msg.lower():
+                display_msg = "SQL Syntax Error. Check your SELECT statement and ORDER BY clause."
             else:
-                display_msg = "Database execution failed. Verify your SQL syntax and schema references."
+                display_msg = f"Database Error: {err_msg[:100]}"
             
             return None, display_msg, (time.time() - start_time) * 1000
         finally:
             if conn:
                 conn.close()
 
-def evaluate_submission(user_id: str, question_id: str, participant_query: str, solution_query: str) -> Dict[str, Any]:
+def evaluate_submission(user_id: str, question_id: str, participant_query: str, solution_query: str, conn_str: Optional[str] = None) -> Dict[str, Any]:
     """
     Full deterministic evaluation flow.
+
+    conn_str: optional ODBC connection string to target the assessment's database.
     """
     # 1. Throttle by rate limit
     if not check_rate_limit(user_id):
@@ -167,13 +178,12 @@ def evaluate_submission(user_id: str, question_id: str, participant_query: str, 
         return {"status": "INCORRECT", "feedback": msg}
 
     # 3. Execute Solution (Gold Standard)
-    # This must work. Admin validates on creation, but we execute against live data.
-    sol_res, sol_err, _ = execute_query(solution_query, "system_eval")
+    sol_res, sol_err, _ = execute_query(solution_query, "system_eval", conn_str=conn_str)
     if sol_err:
         return {"status": "ERROR", "feedback": "System Error: Failed to generate expected results. Please contact an admin."}
 
     # 4. Execute Participant
-    user_res, user_err, user_dur = execute_query(participant_query, user_id)
+    user_res, user_err, user_dur = execute_query(participant_query, user_id, conn_str=conn_str)
     if user_err:
         return {"status": "INCORRECT", "feedback": user_err}
 
@@ -183,11 +193,19 @@ def evaluate_submission(user_id: str, question_id: str, participant_query: str, 
     sol_cols = list(sol_res[0].keys()) if sol_res else []
     
     if len(user_cols) != len(sol_cols):
-        return {"status": "INCORRECT", "feedback": "Column count mismatch. Check your SELECT projection."}
+        return {
+            "status": "INCORRECT", 
+            "feedback": f"Column count mismatch: You returned {len(user_cols)} columns, expected {len(sol_cols)}. Check your SELECT clause."
+        }
     
     # b) Column Names (Case-insensitive check)
     if [c.lower() for c in user_cols] != [c.lower() for c in sol_cols]:
-        return {"status": "INCORRECT", "feedback": "Column names or ordering mismatch. Check your aliases."}
+        user_col_names = ', '.join(user_cols)
+        expected_col_names = ', '.join(sol_cols)
+        return {
+            "status": "INCORRECT", 
+            "feedback": f"Column names or order mismatch. You have: {user_col_names} | Expected: {expected_col_names}"
+        }
 
     # c) Row-by-row ordered equality
     if user_res == sol_res:
@@ -199,12 +217,11 @@ def evaluate_submission(user_id: str, question_id: str, participant_query: str, 
         # Give hints but never the solution
         feedback = "Result set mismatch."
         if len(user_res) != len(sol_res):
-            feedback = f"Row count mismatch. Expected {len(sol_res)} (top 100 limit), got {len(user_res)}."
+            feedback = f"Row count mismatch: You returned {len(user_res)} rows, expected {len(sol_res)}. Check your WHERE clause and filters."
         else:
-            feedback = "Rows match in count but values or order are incorrect. Verify your filters and sorting."
+            feedback = "Row count matches but values or order are incorrect. Check your WHERE conditions, JOINs, and ORDER BY clause."
             
         return {
             "status": "INCORRECT", 
-            "feedback": feedback,
-            "admin_diff_hint": "Specific mismatch found in row data comparison."
+            "feedback": feedback
         }

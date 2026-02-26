@@ -1,66 +1,73 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Assignment } from '../types';
-// Add missing Database icon to the imports
-import { ClipboardList, Clock, CheckCircle2, ArrowRight, BookOpen, Calendar, Lock, Database } from 'lucide-react';
+import { ClipboardList, Clock, CheckCircle2, ArrowRight, BookOpen, Calendar, Lock, Database, RefreshCw } from 'lucide-react';
+import { assignmentsApi, ApiAssignment } from '../services/api';
 
 interface Props {
   onStartAssessment: (id: string) => void;
 }
 
-const ParticipantDashboard: React.FC<Props> = ({ onStartAssessment }) => {
-  // Mock Data: Only assessments assigned to this specific user
-  const assignments: Assignment[] = [
-    {
-      id: 'as1',
-      assessment: {
-        id: 'a1',
-        name: 'PostgreSQL Core Competency',
-        description: 'Internal benchmark for advanced joins, aggregations, and window functions.',
-        duration_minutes: 60,
-        attempts_allowed: 1,
-        questions: [],
-        is_published: true,
-        db_config: {
-          host: 'pg-prod.internal.net',
-          port: 5432,
-          database_name: 'Assessments_DB',
-          username: 'participant_user',
-          password_secret_ref: 'KV_PG_PWD',
-          provider: 'POSTGRES'
-        }
-      },
-      participant_id: 'u1',
-      due_date: '2024-12-31',
-      status: 'PENDING'
+function mapAssignment(a: ApiAssignment): Assignment {
+  const detail = a.assessment_detail;
+  return {
+    id: String(a.id),
+    assessment: {
+      id: String(a.assessment),
+      name: a.assessment_name,
+      description: detail?.description ?? '',
+      duration_minutes: detail?.duration_minutes ?? 60,
+      attempts_allowed: detail?.attempts_allowed ?? 1,
+      questions: [],
+      is_published: detail?.is_published ?? true,
+      db_config: detail?.db_config_detail
+        ? {
+            host: detail.db_config_detail.host,
+            port: detail.db_config_detail.port,
+            database_name: detail.db_config_detail.database_name,
+            username: detail.db_config_detail.username,
+            password_secret_ref: detail.db_config_detail.password_secret_ref,
+            provider: detail.db_config_detail.provider,
+          }
+        : { host: '', port: 1433, database_name: '', username: '', password_secret_ref: '', provider: 'SQL_SERVER' },
     },
-    {
-      id: 'as2',
-      assessment: {
-        id: 'a2',
-        name: 'Internal Data Analysis Fundamentals',
-        description: 'Standardized assessment for basic SELECT, WHERE, and GROUP BY operations.',
-        duration_minutes: 30,
-        attempts_allowed: 2,
-        questions: [],
-        is_published: true,
-        db_config: {
-          host: 'sql-lite-demo.internal.net',
-          port: 1433,
-          database_name: 'Public_Data',
-          username: 'guest_analyst',
-          password_secret_ref: 'KV_SQL_PWD',
-          provider: 'SQL_SERVER'
-        }
-      },
-      participant_id: 'u1',
-      due_date: '2024-11-15',
-      status: 'COMPLETED'
-    }
-  ];
+    participant_id: String(a.user),
+    due_date: a.due_date,
+    status: a.status,
+  };
+}
+
+const ParticipantDashboard: React.FC<Props> = ({ onStartAssessment }) => {
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    assignmentsApi.listMine()
+      .then(data => setAssignments(data.map(mapAssignment)))
+      .catch(e => setError(e instanceof Error ? e.message : 'Failed to load assignments.'))
+      .finally(() => setLoading(false));
+  }, []);
 
   const pendingAssignments = assignments.filter(a => a.status === 'PENDING' || a.status === 'IN_PROGRESS');
   const completedAssignments = assignments.filter(a => a.status === 'COMPLETED');
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64 gap-3 text-slate-400">
+        <RefreshCw className="w-5 h-5 animate-spin" />
+        <span className="text-sm font-medium">Loading your assignments...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-lg mx-auto mt-16 p-6 bg-red-50 border border-red-200 rounded-2xl text-center">
+        <p className="text-sm font-bold text-red-700">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-12">
@@ -79,11 +86,11 @@ const ParticipantDashboard: React.FC<Props> = ({ onStartAssessment }) => {
         <div className="lg:col-span-2 space-y-6">
           <h2 className="text-xl font-bold flex items-center gap-2 text-slate-900">
             <div className="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center">
-               <ClipboardList className="w-4 h-4" />
+              <ClipboardList className="w-4 h-4" />
             </div>
             Assigned to You
           </h2>
-          
+
           <div className="grid gap-4">
             {pendingAssignments.length > 0 ? (
               pendingAssignments.map(a => (
@@ -106,15 +113,15 @@ const ParticipantDashboard: React.FC<Props> = ({ onStartAssessment }) => {
                         <Clock className="w-3.5 h-3.5 text-blue-500" /> {a.assessment.duration_minutes}m
                       </span>
                       <span className="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100">
-                        <BookOpen className="w-3.5 h-3.5 text-indigo-500" /> 5 Challenges
+                        <BookOpen className="w-3.5 h-3.5 text-indigo-500" /> {a.assessment.attempts_allowed} attempt{a.assessment.attempts_allowed !== 1 ? 's' : ''}
                       </span>
                       <span className="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100">
                         <Calendar className="w-3.5 h-3.5 text-amber-500" /> Due {new Date(a.due_date).toLocaleDateString()}
                       </span>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => onStartAssessment(a.assessment.id)}
+                  <button
+                    onClick={() => onStartAssessment(a.id)}
                     className="ml-6 py-3.5 px-8 bg-slate-900 text-white rounded-2xl font-bold flex items-center gap-3 hover:bg-blue-600 transition shadow-xl active:scale-95 shrink-0"
                   >
                     {a.status === 'IN_PROGRESS' ? 'Resume' : 'Begin'} <ArrowRight className="w-4 h-4" />
@@ -130,27 +137,26 @@ const ParticipantDashboard: React.FC<Props> = ({ onStartAssessment }) => {
 
           <h2 className="text-xl font-bold flex items-center gap-2 pt-8 text-slate-900">
             <div className="w-8 h-8 bg-green-100 text-green-600 rounded-lg flex items-center justify-center">
-               <CheckCircle2 className="w-4 h-4" />
+              <CheckCircle2 className="w-4 h-4" />
             </div>
             Completion History
           </h2>
           <div className="grid gap-4">
-            {completedAssignments.map(a => (
+            {completedAssignments.length > 0 ? completedAssignments.map(a => (
               <div key={a.id} className="bg-gray-50 rounded-2xl p-6 border border-gray-100 flex items-center justify-between opacity-80">
                 <div>
                   <h3 className="text-lg font-bold text-gray-700">{a.assessment.name}</h3>
                   <p className="text-gray-500 text-sm mt-1">Completed via Assignment Access</p>
                 </div>
-                <div className="text-right">
-                  <span className="block text-2xl font-extrabold text-slate-900">92%</span>
-                  <span className="text-[10px] text-green-600 font-bold uppercase tracking-widest bg-green-50 px-2 py-0.5 rounded border border-green-100">Verified Pass</span>
-                </div>
+                <span className="text-[10px] text-green-600 font-bold uppercase tracking-widest bg-green-50 px-2 py-0.5 rounded border border-green-100">Completed</span>
               </div>
-            ))}
+            )) : (
+              <div className="text-sm text-slate-400 italic">No completed assessments yet.</div>
+            )}
           </div>
         </div>
 
-        {/* Sidebar info */}
+        {/* Sidebar */}
         <div className="space-y-6">
           <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-3xl p-8 text-white shadow-2xl relative overflow-hidden">
             <div className="absolute top-0 right-0 p-4 opacity-10">
@@ -163,38 +169,30 @@ const ParticipantDashboard: React.FC<Props> = ({ onStartAssessment }) => {
                 <span className="text-2xl font-bold">{assignments.length}</span>
               </div>
               <div className="flex justify-between items-end">
-                <span className="text-slate-400 text-sm font-medium">Average Performance</span>
-                <span className="text-2xl font-bold">88.5%</span>
+                <span className="text-slate-400 text-sm font-medium">Pending</span>
+                <span className="text-2xl font-bold">{pendingAssignments.length}</span>
               </div>
               <div className="flex justify-between items-end border-t border-slate-700 pt-6">
-                <span className="text-slate-400 text-sm font-medium">Rank in Group</span>
-                <span className="text-2xl font-bold text-blue-400">#42</span>
+                <span className="text-slate-400 text-sm font-medium">Completed</span>
+                <span className="text-2xl font-bold text-green-400">{completedAssignments.length}</span>
               </div>
             </div>
           </div>
-          
+
           <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-               Access Rules
-            </h3>
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6">Access Rules</h3>
             <ul className="space-y-4">
               <li className="flex gap-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-1.5 shrink-0"></div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Assessments are <strong>private</strong> and assigned by admins.
-                </p>
+                <p className="text-xs text-slate-600 leading-relaxed">Assessments are <strong>private</strong> and assigned by admins.</p>
               </li>
               <li className="flex gap-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-1.5 shrink-0"></div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Attempts are <strong>logged</strong> and verified against master schemas.
-                </p>
+                <p className="text-xs text-slate-600 leading-relaxed">Attempts are <strong>logged</strong> and verified against master schemas.</p>
               </li>
               <li className="flex gap-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-1.5 shrink-0"></div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Execution is capped at <strong>5 seconds</strong> per query run.
-                </p>
+                <p className="text-xs text-slate-600 leading-relaxed">Execution is capped at <strong>5 seconds</strong> per query run.</p>
               </li>
             </ul>
           </div>

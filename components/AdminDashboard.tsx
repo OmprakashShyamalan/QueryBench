@@ -14,6 +14,10 @@ const BANNED_TOKENS = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'TRUNCATE', 'ALTER'
 
 const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'questions' | 'assessments' | 'assignments' | 'results' | 'infrastructure'>('assessments');
+  const [results, setResults] = useState<any[]>([]);
+  const [resultsLoading, setResultsLoading] = useState(false);
+  const [resultsError, setResultsError] = useState<string | null>(null);
+  const [showAssessmentDetail, setShowAssessmentDetail] = useState<any | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   
   // Data States
@@ -89,6 +93,38 @@ const AdminDashboard: React.FC = () => {
     { label: 'Total Assessments', value: assessments.length.toString(), icon: Database, color: 'text-indigo-600', bg: 'bg-indigo-50' },
     { label: 'Infrastructure Targets', value: targets.length.toString(), icon: Server, color: 'text-amber-600', bg: 'bg-amber-50' },
   ];
+
+  // Fetch results when Results tab is active
+  React.useEffect(() => {
+    if (activeTab === 'results') {
+      setResultsLoading(true);
+      setResultsError(null);
+      import('../services/api').then(api => {
+        api.resultsApi.list()
+          .then(setResults)
+          .catch(e => setResultsError(e.message || 'Failed to load results'))
+          .finally(() => setResultsLoading(false));
+      });
+    }
+  }, [activeTab]);
+
+  // Export results as CSV
+  const exportResultsCsv = () => {
+    if (!results || results.length === 0) return;
+    const headers = Object.keys(results[0]);
+    const csvRows = [headers.join(',')];
+    for (const row of results) {
+      csvRows.push(headers.map(h => JSON.stringify(row[h] ?? '')).join(','));
+    }
+    const csvContent = 'data:text/csv;charset=utf-8,' + csvRows.join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', 'assessment_results.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const downloadCsvTemplate = () => {
     const headers = "title,prompt,difficulty,tags,environment_tag,solution_query,expected_schema_ref";
@@ -452,7 +488,7 @@ const AdminDashboard: React.FC = () => {
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-1 mb-8 bg-gray-200/50 p-1.5 rounded-2xl w-fit">
-        {(['assessments', 'assignments', 'questions', 'infrastructure'] as const).map(tab => (
+        {(['assessments', 'assignments', 'questions', 'results', 'infrastructure'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -463,11 +499,85 @@ const AdminDashboard: React.FC = () => {
             {tab === 'assessments' && <Layers className="w-4 h-4" />}
             {tab === 'assignments' && <UserPlus className="w-4 h-4" />}
             {tab === 'questions' && <ListChecks className="w-4 h-4" />}
+            {tab === 'results' && <FileOutput className="w-4 h-4" />}
             {tab === 'infrastructure' && <Server className="w-4 h-4" />}
             {tab}
           </button>
         ))}
       </div>
+      {/* Content: Results */}
+      {activeTab === 'results' && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-bold text-gray-900">Assessment Results</h2>
+            <button
+              onClick={exportResultsCsv}
+              className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition"
+              disabled={results.length === 0}
+            >
+              <Download className="w-4 h-4" /> Export CSV
+            </button>
+          </div>
+          {resultsLoading ? (
+            <div className="p-8 text-center text-slate-500">Loading results...</div>
+          ) : resultsError ? (
+            <div className="p-8 text-center text-red-500">{resultsError}</div>
+          ) : results.length === 0 ? (
+            <div className="p-8 text-center text-slate-400">No results found.</div>
+          ) : (
+            <div className="overflow-x-auto bg-white rounded-2xl border border-slate-200 shadow-sm">
+              <table className="min-w-full text-xs">
+                <thead>
+                  <tr>
+                    <th className="px-4 py-2">Participant</th>
+                    <th className="px-4 py-2">Email</th>
+                    <th className="px-4 py-2">Assessment</th>
+                    <th className="px-4 py-2">Score</th>
+                    <th className="px-4 py-2">Status</th>
+                    <th className="px-4 py-2">Submitted</th>
+                    <th className="px-4 py-2">Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {results.map((r: any) => (
+                    <tr key={r.id} className="border-t last:border-b-0">
+                      <td className="px-4 py-2 font-bold">{r.participant_name}</td>
+                      <td className="px-4 py-2">{r.participant_email}</td>
+                      <td className="px-4 py-2">{r.assessment_name}</td>
+                      <td className="px-4 py-2">{r.score ?? '-'}</td>
+                      <td className="px-4 py-2">{r.result_status}</td>
+                      <td className="px-4 py-2">{r.submitted_date || r.submitted_at}</td>
+                      <td className="px-4 py-2">
+                        <button className="text-blue-600 underline text-xs" onClick={() => setShowAssessmentDetail(r)}>
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {/* Assessment Details Modal */}
+          {showAssessmentDetail && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowAssessmentDetail(null)}></div>
+              <div className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl relative z-10 border border-slate-100">
+                <h3 className="text-2xl font-bold text-slate-900 mb-2">Assessment Details</h3>
+                <div className="space-y-2 text-sm text-slate-700">
+                  <div><b>Participant:</b> {showAssessmentDetail.participant_name}</div>
+                  <div><b>Email:</b> {showAssessmentDetail.participant_email}</div>
+                  <div><b>Assessment:</b> {showAssessmentDetail.assessment_name}</div>
+                  <div><b>Score:</b> {showAssessmentDetail.score ?? '-'}</div>
+                  <div><b>Status:</b> {showAssessmentDetail.result_status}</div>
+                  <div><b>Submitted:</b> {showAssessmentDetail.submitted_date || showAssessmentDetail.submitted_at}</div>
+                </div>
+                <button onClick={() => setShowAssessmentDetail(null)} className="mt-6 px-6 py-2 bg-slate-700 text-white font-bold rounded-xl hover:bg-slate-600 transition w-full">Close</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Content: Assignments */}
       {activeTab === 'assignments' && (

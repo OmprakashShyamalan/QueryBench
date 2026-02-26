@@ -1,35 +1,14 @@
 
 import React, { useState, useMemo } from 'react';
-import { Download, Trophy, FileOutput, Search, Filter, CheckSquare, Square, X, Calendar, User, Mail } from 'lucide-react';
-
-interface ResultItem {
-  id: string;
-  participant_name: string;
-  participant_email: string;
-  assessment_name: string;
-  score: number;
-  status: 'PASSED' | 'FAILED';
-  submitted_at: string;
-}
-
-// Mock Data for MVP visualization
-const MOCK_RESULTS: ResultItem[] = [
-  { id: 'r1', participant_name: 'Jane Doe', participant_email: 'jane.doe@company.com', assessment_name: 'SQL Server Core V1', score: 92, status: 'PASSED', submitted_at: '2023-11-15' },
-  { id: 'r2', participant_name: 'John Smith', participant_email: 'john.smith@company.com', assessment_name: 'SQL Server Core V1', score: 45, status: 'FAILED', submitted_at: '2023-11-16' },
-  { id: 'r3', participant_name: 'Alice Johnson', participant_email: 'alice.j@company.com', assessment_name: 'PostgreSQL Advanced', score: 88, status: 'PASSED', submitted_at: '2023-11-10' },
-  { id: 'r4', participant_name: 'Bob Brown', participant_email: 'bob.b@company.com', assessment_name: 'SQL Server Core V1', score: 76, status: 'PASSED', submitted_at: '2023-11-12' },
-  { id: 'r5', participant_name: 'Charlie Davis', participant_email: 'charlie.d@company.com', assessment_name: 'PostgreSQL Advanced', score: 60, status: 'FAILED', submitted_at: '2023-11-18' },
-  { id: 'r6', participant_name: 'David Evans', participant_email: 'david.e@company.com', assessment_name: 'Data Analysis Fundamentals', score: 95, status: 'PASSED', submitted_at: '2023-11-20' },
-  { id: 'r7', participant_name: 'Eve Foster', participant_email: 'eve.f@company.com', assessment_name: 'SQL Server Core V1', score: 82, status: 'PASSED', submitted_at: '2023-11-21' },
-];
+import { Download, Trophy, FileOutput, Search, Filter, CheckSquare, Square, X, Calendar } from 'lucide-react';
+import { ApiResult } from '../../../services/api';
 
 interface Props {
-  results: any[];
+  results: ApiResult[];
 }
 
 export const ResultsTab: React.FC<Props> = ({ results }) => {
-  // Use mock data if props are empty for MVP demo
-  const data = results.length > 0 ? results : MOCK_RESULTS;
+  const data = results;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [assessmentFilter, setAssessmentFilter] = useState('');
@@ -51,7 +30,7 @@ export const ResultsTab: React.FC<Props> = ({ results }) => {
     if (selectedIds.size === filteredData.length && filteredData.length > 0) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filteredData.map(r => r.id)));
+      setSelectedIds(new Set(filteredData.map(r => String(r.id))));
     }
   };
 
@@ -63,13 +42,13 @@ export const ResultsTab: React.FC<Props> = ({ results }) => {
   };
 
   const handleExport = () => {
-    const rowsToExport = selectedIds.size > 0 
-      ? data.filter(r => selectedIds.has(r.id))
+    const rowsToExport = selectedIds.size > 0
+      ? data.filter(r => selectedIds.has(String(r.id)))
       : filteredData;
 
     const csvContent = [
       ['Participant', 'Email', 'Assessment', 'Score', 'Status', 'Date'],
-      ...rowsToExport.map(r => [r.participant_name, r.participant_email, r.assessment_name, r.score, r.status, r.submitted_at])
+      ...rowsToExport.map(r => [r.participant_name, r.participant_email, r.assessment_name, r.score ?? '', r.result_status, r.submitted_date ?? ''])
     ].map(e => e.join(",")).join("\n");
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -151,10 +130,10 @@ export const ResultsTab: React.FC<Props> = ({ results }) => {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filteredData.map((r) => (
-              <tr key={r.id} className={`hover:bg-slate-50 transition ${selectedIds.has(r.id) ? 'bg-blue-50/30' : ''}`}>
+              <tr key={r.id} className={`hover:bg-slate-50 transition ${selectedIds.has(String(r.id)) ? 'bg-blue-50/30' : ''}`}>
                 <td className="px-6 py-4">
-                  <button onClick={() => toggleOne(r.id)} className="text-slate-400 hover:text-slate-600">
-                    {selectedIds.has(r.id) ? <CheckSquare className="w-5 h-5 text-blue-600" /> : <Square className="w-5 h-5" />}
+                  <button onClick={() => toggleOne(String(r.id))} className="text-slate-400 hover:text-slate-600">
+                    {selectedIds.has(String(r.id)) ? <CheckSquare className="w-5 h-5 text-blue-600" /> : <Square className="w-5 h-5" />}
                   </button>
                 </td>
                 <td className="px-6 py-4">
@@ -174,13 +153,13 @@ export const ResultsTab: React.FC<Props> = ({ results }) => {
                   {r.assessment_name}
                 </td>
                 <td className="px-6 py-4">
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border ${r.score >= 70 ? 'bg-green-50 text-green-700 border-green-100' : 'bg-red-50 text-red-700 border-red-100'}`}>
-                    <Trophy className="w-3 h-3" /> {r.score}%
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border ${(r.score ?? 0) >= 70 ? 'bg-green-50 text-green-700 border-green-100' : 'bg-red-50 text-red-700 border-red-100'}`}>
+                    <Trophy className="w-3 h-3" /> {r.score != null ? `${r.score}%` : '—'}
                   </span>
                 </td>
                 <td className="px-6 py-4">
                   <span className="text-xs text-slate-500 font-medium flex items-center gap-1.5">
-                    <Calendar className="w-3 h-3 text-slate-400" /> {r.submitted_at}
+                    <Calendar className="w-3 h-3 text-slate-400" /> {r.submitted_date ?? '—'}
                   </span>
                 </td>
                 <td className="px-6 py-4 text-right">

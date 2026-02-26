@@ -32,9 +32,11 @@ export interface SchemaMetadata {
 }
 
 export interface DatabaseConfig {
+  id: number;
   host: string;
   port: number;
   database_name: string;
+  trusted_connection?: boolean;
   username: string;
   password?: string; // Direct password entry for MVP/Dev
   password_secret_ref: string; // Reference to Azure Key Vault / Environment Variable

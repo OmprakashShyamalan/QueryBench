@@ -12,8 +12,9 @@ class DatabaseConfig(models.Model):
     host = models.CharField(max_length=255)
     port = models.IntegerField(default=1433)
     database_name = models.CharField(max_length=128)
-    username = models.CharField(max_length=128)
-    password_secret_ref = models.CharField(max_length=255)
+    trusted_connection = models.BooleanField(default=False)
+    username = models.CharField(max_length=128, blank=True, default='')
+    password_secret_ref = models.CharField(max_length=255, blank=True, default='')
     provider = models.CharField(max_length=50, choices=PROVIDER_CHOICES)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -32,6 +33,7 @@ class Question(models.Model):
     tags = models.JSONField(default=list, blank=True)
     expected_schema_ref = models.CharField(max_length=255, null=True, blank=True)
     solution_query = models.TextField()
+    is_validated = models.BooleanField(default=False)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python manage.py check --database default)",
+      "Bash(python -c \"import django, os; os.environ.setdefault\\(''DJANGO_SETTINGS_MODULE'',''querybench.settings''\\); django.setup\\(\\); from django.db import connection; print\\(''ENGINE:'', connection.settings_dict[''ENGINE'']\\); print\\(''NAME:'', connection.settings_dict[''NAME'']\\)\")",
+      "Bash(python manage.py showmigrations api)",
+      "Bash(python -c \":*)",
+      "Bash(python manage.py makemigrations api)",
+      "Bash(python manage.py migrate)",
+      "Bash(DJANGO_SUPERUSER_PASSWORD=admin123 python manage.py createsuperuser --username admin --email admin@querybench.local --noinput)",
+      "Bash(python manage.py check)"
+    ]
+  }
+}
