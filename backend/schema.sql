@@ -8,7 +8,7 @@ USE QueryBench;
 GO
 
 -- 1. Database Configurations (Target systems for evaluation)
-CREATE TABLE DatabaseConfigs (
+CREATE TABLE database_configs (
     id INT IDENTITY(1,1) PRIMARY KEY,
     config_name NVARCHAR(100) NOT NULL,
     host NVARCHAR(255) NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE DatabaseConfigs (
 );
 
 -- 2. Users and Roles
-CREATE TABLE Users (
+CREATE TABLE users (
     id INT IDENTITY(1,1) PRIMARY KEY,
     email NVARCHAR(255) NOT NULL UNIQUE,
     full_name NVARCHAR(255) NOT NULL,
@@ -32,7 +32,7 @@ CREATE TABLE Users (
 );
 
 -- 3. Master Question Library
-CREATE TABLE Questions (
+CREATE TABLE questions (
     id INT IDENTITY(1,1) PRIMARY KEY,
     title NVARCHAR(255) NOT NULL,
     prompt NVARCHAR(MAX) NOT NULL,
@@ -45,7 +45,7 @@ CREATE TABLE Questions (
 );
 
 -- 4. Assessments (Test Headers)
-CREATE TABLE Assessments (
+CREATE TABLE assessments (
     id INT IDENTITY(1,1) PRIMARY KEY,
     name NVARCHAR(255) NOT NULL,
     description NVARCHAR(MAX),
@@ -57,7 +57,7 @@ CREATE TABLE Assessments (
 );
 
 -- 5. Assessment-Question Mapping (Many-to-Many)
-CREATE TABLE AssessmentQuestions (
+CREATE TABLE assessment_questions (
     assessment_id INT FOREIGN KEY REFERENCES Assessments(id),
     question_id INT FOREIGN KEY REFERENCES Questions(id),
     sort_order INT DEFAULT 0,
@@ -66,7 +66,7 @@ CREATE TABLE AssessmentQuestions (
 );
 
 -- 6. Assignments (Giving a test to a user)
-CREATE TABLE Assignments (
+CREATE TABLE assignments (
     id INT IDENTITY(1,1) PRIMARY KEY,
     assessment_id INT FOREIGN KEY REFERENCES Assessments(id),
     user_id INT FOREIGN KEY REFERENCES Users(id),
@@ -76,7 +76,7 @@ CREATE TABLE Assignments (
 );
 
 -- 7. Attempts (A specific instance of a user taking a test)
-CREATE TABLE Attempts (
+CREATE TABLE attempts (
     id INT IDENTITY(1,1) PRIMARY KEY,
     assignment_id INT FOREIGN KEY REFERENCES Assignments(id),
     started_at DATETIME2 DEFAULT GETDATE(),
@@ -86,7 +86,7 @@ CREATE TABLE Attempts (
 );
 
 -- 8. Attempt Answers (Per-question response)
-CREATE TABLE AttemptAnswers (
+CREATE TABLE attempt_answers (
     id INT IDENTITY(1,1) PRIMARY KEY,
     attempt_id INT FOREIGN KEY REFERENCES Attempts(id),
     question_id INT FOREIGN KEY REFERENCES Questions(id),
@@ -98,7 +98,7 @@ CREATE TABLE AttemptAnswers (
 );
 
 -- Performance Indexes
-CREATE INDEX IX_Assignments_User ON Assignments(user_id);
-CREATE INDEX IX_Attempts_Assignment ON Attempts(assignment_id);
-CREATE INDEX IX_Questions_Difficulty ON Questions(difficulty);
+CREATE INDEX IX_assignments_user ON assignments(user_id);
+CREATE INDEX IX_attempts_assignment ON attempts(assignment_id);
+CREATE INDEX IX_questions_difficulty ON questions(difficulty);
 GO

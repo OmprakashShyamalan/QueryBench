@@ -21,6 +21,8 @@ QueryBench/
 │   ├── models.py          # ORM (Management DB)
 │   ├── serializers.py     # DRF Serializers
 │   └── views.py           # API endpoints
+
+│   ├── migrations/        # Django migrations (reflects table changes)
 │
 ├── backend/               # Assessment Assets
 │   ├── runner.py          # SQL Evaluation Logic
@@ -78,7 +80,21 @@ npm run dev
 - **SQL Server Driver**: Ensure "ODBC Driver 17 for SQL Server" is installed on your OS.
 - **Database Connection**: Check `DB_HOST` and `DB_PORT` in `.env`.
 - **Port Conflict**: If 8080 or 3000 are in use, modify the startup command or `vite.config.ts`.
-- **Decimal Error**: If you see `decimal_length` errors, ensure `api/models.py` has been updated to `decimal_places`.
+- **Decimal Error**: If you see `decimal_length` errors, ensure `api/models.py` and `backend/schema.sql` use `decimal_places` for all decimal fields.
+
+## 📋 Database Table Names
+The following tables are used in the platform (see `backend/schema.sql` and `api/models.py`):
+
+- `database_configs`
+- `users`
+- `questions`
+- `assessments`
+- `assessment_questions`
+- `assignments`
+- `attempts`
+- `attempt_answers`
+
+All table names are lower_snake_case in Django ORM and backend DDL.
 
 ## 🔒 Internal Use Only
 This application is designed for deployment within a corporate VPN. Ensure that your target database connections use read-only credentials with limited schema access.
