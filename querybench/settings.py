@@ -124,3 +124,6 @@ CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000').split(',')
 CSRF_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_SAMESITE = 'Lax'
+
+# Session expires when the browser is closed (no persistent cookies across sessions)
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True

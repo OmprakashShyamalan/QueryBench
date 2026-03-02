@@ -1,3 +1,57 @@
+import re
+
+# --- Table extraction utility ---
+def extract_tables_from_sqlserver(sql: str) -> set[str]:
+    """
+    Extracts table/view names from a SQL Server query string.
+    Handles:
+      - FROM and JOIN table refs
+      - schema prefixes (dbo.Users)
+      - aliases (Users u)
+      - bracketed names ([dbo].[Users])
+      - WITH CTE (ignores CTE names, extracts from CTE body and final SELECT)
+      - Ignores comments and string literals
+    Returns a set of normalized table names (case-insensitive, no brackets).
+    """
+    # Remove line/block comments
+    sql = re.sub(r'--.*?$', '', sql, flags=re.MULTILINE)
+    sql = re.sub(r'/\*.*?\*/', '', sql, flags=re.DOTALL)
+    # Remove string literals (single/double quotes)
+    sql = re.sub(r"'([^']|'')*'", "''", sql)
+    sql = re.sub(r'"([^"]|"")*"', '""', sql)
+
+    # Helper: normalize table name (strip brackets, lower, keep schema)
+    def norm(name):
+        name = name.strip()
+        if name.startswith('[') and name.endswith(']'):
+            name = name[1:-1]
+        name = name.replace('[', '').replace(']', '')
+        return name.lower()
+
+    tables = set()
+
+    # Handle CTEs: extract CTE body and final SELECT
+    cte_match = re.match(r'\s*WITH\s+(.*?)\)\s*SELECT', sql, flags=re.IGNORECASE|re.DOTALL)
+    if cte_match:
+        # Try to extract all subqueries in CTEs
+        cte_body = cte_match.group(1)
+        # Find all FROM/JOIN in CTE body
+        for m in re.finditer(r'(FROM|JOIN)\s+([\[\]\w\.]+)', cte_body, flags=re.IGNORECASE):
+            tables.add(norm(m.group(2)))
+        # Continue with the rest after the last )SELECT
+        sql = sql[cte_match.end()-6:]
+
+    # Find all FROM/JOIN table refs in the remaining SQL
+    for m in re.finditer(r'(FROM|JOIN)\s+([\[\]\w\.]+)', sql, flags=re.IGNORECASE):
+        tables.add(norm(m.group(2)))
+
+    # Remove CTE names if present (CTE names are before AS in WITH ... AS (...))
+    # Not perfect, but avoids false positives
+    if 'with' in sql.lower():
+        for m in re.finditer(r'with\s+([\w\[\]]+)\s+as', sql, flags=re.IGNORECASE):
+            tables.discard(norm(m.group(1)))
+
+    return {t for t in tables if t}
 
 import pyodbc
 from typing import Dict, List, Any, Optional
@@ -57,7 +111,7 @@ def _parse_rows(rows) -> Dict[str, Any]:
     return {"tables": list(tables_map.values())}
 
 
-def inspect_schema(db_config_id: int = None, conn_str: Optional[str] = None) -> Dict[str, Any]:
+def inspect_schema(db_config_id: int = None, conn_str: Optional[str] = None, solution_query: Optional[str] = None) -> Dict[str, Any]:
     """
     Extracts schema metadata (Tables, Columns, PKs, FKs) from the target database.
 
@@ -73,7 +127,31 @@ def inspect_schema(db_config_id: int = None, conn_str: Optional[str] = None) -> 
         cursor = conn.cursor()
         cursor.execute(_META_QUERY)
         rows = cursor.fetchall()
-        return _parse_rows(rows)
+        full_schema = _parse_rows(rows)
+
+        if solution_query:
+            from .schema_loader import extract_tables_from_sqlserver
+            referenced = extract_tables_from_sqlserver(solution_query)
+            if referenced:
+                # Filter tables
+                filtered_tables = []
+                referenced_set = set(t.lower() for t in referenced)
+                for t in full_schema['tables']:
+                    if t['name'].lower() in referenced_set:
+                        filtered_tables.append(t)
+                # Filter relationships: only keep FKs where both tables are present
+                present = set(t['name'].lower() for t in filtered_tables)
+                for t in filtered_tables:
+                    t['columns'] = [
+                        col if not (col.get('isForeignKey') and col.get('references'))
+                        or col['references']['table'].lower() in present
+                        else {k: v for k, v in col.items() if k != 'references'}
+                        for col in t['columns']
+                    ]
+                if filtered_tables:
+                    return {'tables': filtered_tables}
+        # Fallback: return full schema
+        return full_schema
     except Exception as e:
         return {"error": str(e), "tables": []}
     finally:

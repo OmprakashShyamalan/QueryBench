@@ -5,8 +5,8 @@ from .views import (
     QuestionViewSet, AssessmentViewSet, AssignmentViewSet,
     AttemptViewSet, DatabaseConfigViewSet,
     login_view, logout_view, me_view,
-    results_view, bulk_assign_view,
-    users_view, user_detail_view,
+    results_view, bulk_assign_view, bulk_assign_by_text_view,
+    users_view, user_detail_view, bulk_import_users_view,
     schema_view,
 )
 
@@ -26,8 +26,10 @@ urlpatterns = [
     path('results/', results_view, name='results'),
     path('schema/', schema_view, name='schema'),
     path('assignments/bulk_assign/', bulk_assign_view, name='bulk-assign'),
+    path('assignments/bulk_assign_by_text/', bulk_assign_by_text_view, name='bulk-assign-by-text'),
     path('users/', users_view, name='users'),
     path('users/<int:pk>/', user_detail_view, name='user-detail'),
+    path('users/bulk_import/', bulk_import_users_view, name='users-bulk-import'),
     # Router last
     path('', include(router.urls)),
 ]

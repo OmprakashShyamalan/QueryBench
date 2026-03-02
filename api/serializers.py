@@ -61,6 +61,13 @@ class AttemptAnswerSerializer(serializers.ModelSerializer):
 
 class AttemptSerializer(serializers.ModelSerializer):
     answers = AttemptAnswerSerializer(many=True, read_only=True)
+    time_remaining_seconds = serializers.SerializerMethodField()
+
+    def get_time_remaining_seconds(self, obj):
+        from django.utils import timezone
+        duration_seconds = obj.assignment.assessment.duration_minutes * 60
+        elapsed = (timezone.now() - obj.started_at).total_seconds()
+        return max(0, int(duration_seconds - elapsed))
 
     class Meta:
         model = Attempt

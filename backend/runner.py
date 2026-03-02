@@ -1,227 +1,211 @@
 
-import re
 import decimal
 import datetime
 import time
 import pyodbc
 import logging
 from typing import List, Dict, Any, Tuple, Optional
+
 from .config import QUERY_TIMEOUT_SECONDS, MAX_RESULT_ROWS, DECIMAL_PRECISION, CASE_INSENSITIVE_COLUMNS, STRIP_STRINGS
 from .db_router import db_router
 from .governor import query_semaphore, check_rate_limit
+from . import sql_eval
 
 logger = logging.getLogger("QueryBench.Runner")
 
-# Security: Forbidden Keywords / Tokens (Banned server-side commands for SQL Server)
-BANNED_TOKENS = [
-    r'\bDROP\b', r'\bDELETE\b', r'\bUPDATE\b', r'\bINSERT\b', r'\bTRUNCATE\b',
-    r'\bALTER\b', r'\bEXEC\b', r'\bEXECUTE\b', r'\bMERGE\b', r'\bGRANT\b',
-    r'\bREVOKE\b', r'\bXP_CMDSHELL\b', r'\bSP_CONFIGURE\b', r'\bOPENROWSET\b',
-    r'\bOPENDATASOURCE\b', r'\bCREATE\b', r'\bINTO\b', r'\bOUTPUT\b', r'\bBACKUP\b', r'\bRESTORE\b'
-]
 
 def validate_sql_security(query: str, is_solution: bool = False) -> Tuple[bool, str]:
     """
-    Strict validation for QueryBench (SQL Server).
+    Validates a SQL query for safety.  Delegates to sql_eval.validate_sql.
+
+    Returns (True, "") on success or (False, human-readable reason) on failure.
+    ``is_solution`` is retained for API compatibility but has no effect — both
+    participant and solution queries are validated with the same rules.
     """
-    clean_query = query.strip()
-    upper_query = clean_query.upper()
-    
-    # 1. Basics: Must start with SELECT or WITH (for CTEs)
-    if not (upper_query.startswith('SELECT') or upper_query.startswith('WITH')):
-        return False, "Query must be a SELECT statement."
+    try:
+        sql_eval.validate_sql(query)
+        return True, ""
+    except ValueError as e:
+        return False, str(e)
 
-    # 2. Block multi-statement / comments
-    # Disallow semicolons that aren't at the very end
-    if ';' in clean_query:
-        if clean_query.rstrip().rstrip(';').find(';') != -1:
-            return False, "Multi-statement queries are disallowed for security."
-
-    if '--' in clean_query or '/*' in clean_query:
-        return False, "SQL comments are disallowed to ensure clarity and block obfuscated injections."
-
-    # 3. Block DDL/DML/System commands
-    for token in BANNED_TOKENS:
-        if re.search(token, upper_query):
-            return False, f"Unauthorized token detected: {token.replace(r'\\b', '')}"
-            
-    # 4. Deterministic Ordering check (Mandatory for TOP 100 fairness)
-    if 'ORDER BY' not in upper_query:
-        msg = "Solution query must include ORDER BY for deterministic scoring." if is_solution else \
-              "ORDER BY is required for deterministic scoring. Add ORDER BY and retry."
-        return False, msg
-
-    return True, ""
-
-def rewrite_to_top_100(query: str) -> str:
-    """
-    Rewrites a SQL Server SELECT to enforce TOP (100).
-    Wraps the query to ensure we capture the final projection without corrupting complex subqueries.
-    """
-    # Removing trailing semicolon if present to avoid syntax error in wrapper
-    clean_sql = query.strip().rstrip(';')
-    
-    # We wrap the user's query and apply TOP (100).
-    # NOTE: In SQL Server, the inner query CANNOT have an ORDER BY unless TOP/OFFSET is used.
-    # If the user provided an ORDER BY, the wrapper must move it outside or the query must be injected.
-    
-    # Improved Injection logic:
-    # Handle WITH clauses separately, then inject TOP (100) after the first SELECT
-    limit = MAX_RESULT_ROWS
-    
-    # This regex looks for the first SELECT and injects TOP (limit)
-    # It handles optional WITH clauses and DISTINCT
-    pattern = r'^(\s*WITH\s+.*?\bAS\s+\(.*?\)\s*)?(\s*SELECT\b)(\s+DISTINCT\b)?'
-    if re.search(pattern, clean_sql, re.IGNORECASE | re.DOTALL):
-        rewritten = re.sub(pattern, rf'\1\2\3 TOP ({limit})', clean_sql, count=1, flags=re.IGNORECASE | re.DOTALL)
-        return rewritten
-    
-    # Fallback wrapper if regex fails (though less performant/more fragile with ordering)
-    return f"SELECT TOP ({limit}) * FROM ({clean_sql}) AS q"
 
 def normalize_value(val: Any) -> Any:
-    """
-    Normalizes values for fair deterministic comparison.
-    """
+    """Per-cell value normalisation used by execute_query."""
     if val is None:
         return None
     if isinstance(val, decimal.Decimal):
         return round(float(val), DECIMAL_PRECISION)
     if isinstance(val, (datetime.date, datetime.datetime)):
-        # Normalize time to ISO 8601 without microseconds
         return val.replace(microsecond=0).isoformat()
     if isinstance(val, str) and STRIP_STRINGS:
         return val.strip()
     return val
 
-def execute_query(query: str, user_id: str = "system", conn_str: Optional[str] = None) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str], float]:
-    """
-    Safely executes query on SQL Server with TOP 100 rewrite, timeout, and concurrency control.
 
-    If conn_str is provided, connects to that database directly instead of using the router.
+def execute_query(
+    query: str,
+    user_id: str = "system",
+    conn_str: Optional[str] = None,
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str], float]:
+    """
+    Safely executes a query on SQL Server with enforced row limit (never wraps in a derived table), timeout,
+    and app-wide concurrency control.
+
+    - Row limit is always enforced at the outermost SELECT (never by wrapping in a derived table)
+    - ORDER BY is always preserved at the top level (never inside a derived table)
+    - CTEs and queries with ORDER BY are supported and safe
+    - All unsafe or ambiguous SQL is rejected by validate_sql
+
+    ``conn_str``: if provided, connects to that database directly rather
+    than using the router (used for per-assessment database targeting).
     """
     start_time = time.time()
 
-    # 1. Enforce App-wide concurrency cap
     with query_semaphore:
         conn = None
         try:
             if conn_str:
                 conn = pyodbc.connect(conn_str, timeout=2)
             else:
-                # Router handles load balancing across replicas/primary
                 conn = db_router.get_connection()
             cursor = conn.cursor()
-            
-            # Configure statement-level timeout if supported by driver, 
-            # otherwise we rely on DB user limits and LOCK_TIMEOUT
+
+            # Best-effort statement-level timeout via ODBC driver hint
             try:
-                # Some ODBC drivers allow setting query timeout
                 cursor.setinputsizes([(pyodbc.SQL_QUERY_TIMEOUT, QUERY_TIMEOUT_SECONDS, 0)])
-            except:
+            except Exception:
                 pass
 
-            rewritten_sql = rewrite_to_top_100(query)
-            
-            # Execute the query
+            rewritten_sql = sql_eval.apply_row_limit(query)
             cursor.execute(rewritten_sql)
-            
-            # Prepare result structure
+
             cols = [column[0] for column in cursor.description]
             if CASE_INSENSITIVE_COLUMNS:
                 cols = [c.lower() for c in cols]
 
-            # Hard fetch limit in application memory
+            # Hard fetch cap in application memory (defence-in-depth)
             rows = cursor.fetchmany(MAX_RESULT_ROWS)
-            
-            results = []
-            for row in rows:
-                results.append(dict(zip(cols, [normalize_value(v) for v in row])))
-            
+
+            results = [
+                dict(zip(cols, [normalize_value(v) for v in row]))
+                for row in rows
+            ]
+
             duration_ms = (time.time() - start_time) * 1000
-            
-            logger.info(f"User: {user_id} | Execution Success | Target: {conn.getinfo(pyodbc.SQL_SERVER_NAME)} | Duration: {duration_ms:.1f}ms")
+            logger.info(
+                f"User: {user_id} | Execution Success | "
+                f"Target: {conn.getinfo(pyodbc.SQL_SERVER_NAME)} | "
+                f"Duration: {duration_ms:.1f}ms"
+            )
             return results, None, duration_ms
 
         except pyodbc.Error as e:
             err_msg = str(e)
             logger.error(f"User: {user_id} | Execution Error: {err_msg}")
-            
-            # Sanitize error to avoid leaking internals
+
             if "timeout" in err_msg.lower():
                 display_msg = "Query execution timed out. Limit your query's complexity or check for missing joins."
             elif "invalid object name" in err_msg.lower() or "does not exist" in err_msg.lower():
                 display_msg = "Table or column not found. Check the Explorer tab to see available tables and columns."
             elif "syntax error" in err_msg.lower():
-                display_msg = "SQL Syntax Error. Check your SELECT statement and ORDER BY clause."
+                display_msg = "SQL Syntax Error. Please review your query syntax."
             else:
                 display_msg = f"Database Error: {err_msg[:100]}"
-            
+
             return None, display_msg, (time.time() - start_time) * 1000
         finally:
             if conn:
                 conn.close()
 
-def evaluate_submission(user_id: str, question_id: str, participant_query: str, solution_query: str, conn_str: Optional[str] = None) -> Dict[str, Any]:
+
+def evaluate_submission(
+    user_id: str,
+    question_id: str,
+    participant_query: str,
+    solution_query: str,
+    conn_str: Optional[str] = None,
+    order_sensitive: bool = False,
+) -> Dict[str, Any]:
     """
     Full deterministic evaluation flow.
 
-    conn_str: optional ODBC connection string to target the assessment's database.
+    ``conn_str``:      optional ODBC connection string for the assessment database.
+    ``order_sensitive``: when False (default) result rows are compared as an
+                         unordered set — ORDER BY in the participant query does
+                         not affect the CORRECT/INCORRECT verdict.
+                         When True, row order must match the solution exactly.
     """
-    # 1. Throttle by rate limit
+    # 1. Per-user rate limit
     if not check_rate_limit(user_id):
         return {"status": "ERROR", "feedback": "Rate limit exceeded. Please wait a moment before submitting again."}
 
-    # 2. Security & Determinism check (Participant)
+    # 2. Security validation (participant only; solution queries are admin-trusted)
     is_safe, msg = validate_sql_security(participant_query)
     if not is_safe:
         return {"status": "INCORRECT", "feedback": msg}
 
-    # 3. Execute Solution (Gold Standard)
+    # 3. Execute solution (gold standard)
     sol_res, sol_err, _ = execute_query(solution_query, "system_eval", conn_str=conn_str)
     if sol_err:
         return {"status": "ERROR", "feedback": "System Error: Failed to generate expected results. Please contact an admin."}
 
-    # 4. Execute Participant
+    # 4. Execute participant query
     user_res, user_err, user_dur = execute_query(participant_query, user_id, conn_str=conn_str)
     if user_err:
         return {"status": "INCORRECT", "feedback": user_err}
 
-    # 5. Deterministic Ordered Comparison
-    # a) Column count
+    # 5. Structural checks — column count and names
     user_cols = list(user_res[0].keys()) if user_res else []
-    sol_cols = list(sol_res[0].keys()) if sol_res else []
-    
+    sol_cols  = list(sol_res[0].keys())  if sol_res  else []
+
     if len(user_cols) != len(sol_cols):
         return {
-            "status": "INCORRECT", 
-            "feedback": f"Column count mismatch: You returned {len(user_cols)} columns, expected {len(sol_cols)}. Check your SELECT clause."
-        }
-    
-    # b) Column Names (Case-insensitive check)
-    if [c.lower() for c in user_cols] != [c.lower() for c in sol_cols]:
-        user_col_names = ', '.join(user_cols)
-        expected_col_names = ', '.join(sol_cols)
-        return {
-            "status": "INCORRECT", 
-            "feedback": f"Column names or order mismatch. You have: {user_col_names} | Expected: {expected_col_names}"
+            "status": "INCORRECT",
+            "feedback": (
+                f"Column count mismatch: You returned {len(user_cols)} columns, "
+                f"expected {len(sol_cols)}. Check your SELECT clause."
+            ),
         }
 
-    # c) Row-by-row ordered equality
-    if user_res == sol_res:
+    if [c.lower() for c in user_cols] != [c.lower() for c in sol_cols]:
+        return {
+            "status": "INCORRECT",
+            "feedback": (
+                f"Column names or order mismatch. "
+                f"You have: {', '.join(user_cols)} | Expected: {', '.join(sol_cols)}"
+            ),
+        }
+
+    # 6. Row-level comparison
+    if order_sensitive:
+        # Exact ordered comparison — ORDER BY matters
+        is_correct = (user_res == sol_res)
+        order_hint = (
+            " Check your ORDER BY clause."
+            if not is_correct and len(user_res) == len(sol_res)
+            else ""
+        )
+    else:
+        # Set comparison — sort both sides before comparing
+        is_correct = (
+            sql_eval.normalize_result(user_res, user_cols)
+            == sql_eval.normalize_result(sol_res, sol_cols)
+        )
+        order_hint = ""
+
+    if is_correct:
         return {
             "status": "CORRECT",
-            "execution_metadata": {"duration_ms": user_dur, "rows_returned": len(user_res)}
+            "execution_metadata": {"duration_ms": user_dur, "rows_returned": len(user_res)},
         }
+
+    feedback = "Result set mismatch."
+    if len(user_res) != len(sol_res):
+        feedback = (
+            f"Row count mismatch: You returned {len(user_res)} rows, "
+            f"expected {len(sol_res)}. Check your WHERE clause and filters."
+        )
     else:
-        # Give hints but never the solution
-        feedback = "Result set mismatch."
-        if len(user_res) != len(sol_res):
-            feedback = f"Row count mismatch: You returned {len(user_res)} rows, expected {len(sol_res)}. Check your WHERE clause and filters."
-        else:
-            feedback = "Row count matches but values or order are incorrect. Check your WHERE conditions, JOINs, and ORDER BY clause."
-            
-        return {
-            "status": "INCORRECT", 
-            "feedback": feedback
-        }
+        feedback = f"Row count matches but values are incorrect.{order_hint} Check your WHERE conditions and JOINs."
+
+    return {"status": "INCORRECT", "feedback": feedback}

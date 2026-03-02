@@ -1,4 +1,5 @@
 
+import logging
 from decimal import Decimal
 from django.contrib.auth import authenticate, login, logout # type: ignore
 from django.contrib.auth.models import User
@@ -9,8 +10,10 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from .models import DatabaseConfig, Question, Assessment, AssessmentQuestion, Assignment, Attempt, AttemptAnswer
 from .serializers import *
-from backend.runner import evaluate_submission, execute_query
+from backend.runner import evaluate_submission, execute_query, validate_sql_security
 from backend.schema_loader import inspect_schema
+
+logger = logging.getLogger(__name__)
 
 
 def _user_to_dict(user):
@@ -77,6 +80,98 @@ def logout_view(request):
     return Response({'message': 'Logged out successfully.'})
 
 
+@api_view(['POST'])
+def bulk_import_users_view(request):
+    """
+    Creates multiple users from a list.
+    Expects: { "users": [{ "username", "email", "password", "first_name", "last_name", "role" }, ...] }
+    """
+    rows = request.data.get('users', [])
+    if not rows:
+        return Response({'error': 'No user rows provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    created, errors = [], []
+    for row in rows:
+        username = (row.get('username') or '').strip()
+        password = (row.get('password') or '').strip()
+        email = (row.get('email') or '').strip()
+        first_name = (row.get('first_name') or '').strip()
+        last_name = (row.get('last_name') or '').strip()
+        role = (row.get('role') or 'PARTICIPANT').strip().upper()
+
+        if not username or not password:
+            errors.append({'username': username or '(blank)', 'error': 'Username and password are required.'})
+            continue
+        if User.objects.filter(username=username).exists():
+            errors.append({'username': username, 'error': f"Username '{username}' already exists."})
+            continue
+        try:
+            user = User.objects.create_user(
+                username=username, email=email, password=password,
+                first_name=first_name, last_name=last_name,
+            )
+            user.is_staff = (role == 'ADMIN')
+            user.is_superuser = (role == 'ADMIN')
+            user.save()
+            created.append(_user_to_dict(user))
+        except Exception as e:
+            errors.append({'username': username, 'error': str(e)})
+
+    return Response(
+        {'created': created, 'errors': errors},
+        status=status.HTTP_207_MULTI_STATUS if errors else status.HTTP_201_CREATED,
+    )
+
+
+@api_view(['POST'])
+def bulk_assign_by_text_view(request):
+    """
+    Creates assignments by resolving a list of usernames or emails (instead of user IDs).
+    Expects: { "assessment_id": int, "identifiers": ["user@email.com", "username", ...], "due_date": "YYYY-MM-DD" }
+    """
+    assessment_id = request.data.get('assessment_id')
+    identifiers = request.data.get('identifiers', [])
+    due_date = request.data.get('due_date')
+
+    if not assessment_id or not identifiers or not due_date:
+        return Response(
+            {'error': 'assessment_id, identifiers, and due_date are required.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        assessment = Assessment.objects.get(id=assessment_id)
+    except Assessment.DoesNotExist:
+        return Response({'error': 'Assessment not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    created, errors = [], []
+    for identifier in identifiers:
+        identifier = identifier.strip()
+        if not identifier:
+            continue
+        user = (
+            User.objects.filter(username=identifier).first()
+            or User.objects.filter(email=identifier).first()
+        )
+        if not user:
+            errors.append({'identifier': identifier, 'error': f"No user found with username or email '{identifier}'."})
+            continue
+        try:
+            assignment, _ = Assignment.objects.get_or_create(
+                assessment=assessment,
+                user=user,
+                defaults={'due_date': due_date, 'status': 'PENDING'},
+            )
+            created.append(AssignmentSerializer(assignment).data)
+        except Exception as e:
+            errors.append({'identifier': identifier, 'error': str(e)})
+
+    return Response(
+        {'created': created, 'errors': errors},
+        status=status.HTTP_207_MULTI_STATUS if errors else status.HTTP_201_CREATED,
+    )
+
+
 @api_view(['GET'])
 def me_view(request):
     return Response(_user_to_dict(request.user))
@@ -91,6 +186,15 @@ def schema_view(request):
     GET /api/v1/schema/?config_id=<id>
     """
     config_id = request.query_params.get('config_id')
+    question_id = request.query_params.get('question_id')
+    solution_query = None
+    if question_id:
+        try:
+            q = Question.objects.get(pk=question_id)
+            solution_query = q.solution_query
+        except Question.DoesNotExist:
+            pass
+
     if not config_id:
         return Response({'error': 'config_id query parameter is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -100,7 +204,7 @@ def schema_view(request):
         return Response({'error': 'DatabaseConfig not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     conn_str = _build_conn_str(config)
-    schema = inspect_schema(conn_str=conn_str)
+    schema = inspect_schema(conn_str=conn_str, solution_query=solution_query)
     return Response(schema)
 
 
@@ -112,7 +216,7 @@ class QuestionViewSet(viewsets.ModelViewSet):
 
 
 class AssessmentViewSet(viewsets.ModelViewSet):
-    queryset = Assessment.objects.all()
+    queryset = Assessment.objects.prefetch_related('questions').all()
     serializer_class = AssessmentSerializer
 
     @action(detail=True, methods=['post'])
@@ -143,7 +247,9 @@ class AssignmentViewSet(viewsets.ModelViewSet):
     serializer_class = AssignmentSerializer
 
     def get_queryset(self):
-        qs = Assignment.objects.select_related('assessment', 'assessment__db_config', 'user').all()
+        qs = Assignment.objects.select_related(
+            'assessment', 'assessment__db_config', 'user'
+        ).prefetch_related('assessment__questions').all()
         if self.request.query_params.get('me'):
             qs = qs.filter(user=self.request.user)
         return qs
@@ -154,9 +260,15 @@ class AssignmentViewSet(viewsets.ModelViewSet):
         if assignment.status == 'COMPLETED':
             return Response({'error': 'Assignment already completed.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Return existing active (not yet submitted) attempt to support resuming
+        # Return existing active (not yet submitted) attempt to support resuming —
+        # UNLESS the participant closed the tab, in which case the attempt is locked.
         existing = assignment.attempts.filter(submitted_at__isnull=True).first()
         if existing:
+            if existing.is_session_closed:
+                return Response(
+                    {'error': 'Your session was closed when you left. This attempt cannot be resumed.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             return Response(AttemptSerializer(existing).data)
 
         # Create a fresh attempt
@@ -167,7 +279,7 @@ class AssignmentViewSet(viewsets.ModelViewSet):
 
 
 class AttemptViewSet(viewsets.ModelViewSet):
-    queryset = Attempt.objects.all()
+    queryset = Attempt.objects.select_related('assignment__assessment').prefetch_related('answers').all()
     serializer_class = AttemptSerializer
 
     @action(detail=True, methods=['post'])
@@ -196,6 +308,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
             participant_query=participant_query,
             solution_query=question.solution_query,
             conn_str=conn_str,
+            order_sensitive=question.order_sensitive,
         )
 
         # Persist the answer
@@ -240,6 +353,25 @@ class AttemptViewSet(viewsets.ModelViewSet):
             'submitted_at': attempt.submitted_at,
         })
 
+    @action(detail=True, methods=['post'])
+    def close_session(self, request, pk=None):
+        """
+        Called via navigator.sendBeacon when the participant closes the tab.
+
+        - If the attempt is still in progress (not yet submitted), marks it as
+          session-closed (preventing resume) and destroys the Django session.
+        - If already submitted, only destroys the session (safe to call twice).
+
+        CSRF token must be supplied as the ``csrfmiddlewaretoken`` form field
+        (URLSearchParams body) because sendBeacon cannot set custom headers.
+        """
+        attempt = self.get_object()
+        if attempt.submitted_at is None:
+            attempt.is_session_closed = True
+            attempt.save()
+        logout(request)
+        return Response({'status': 'closed'})
+
     @action(detail=False, methods=['post'])
     def run_query(self, request):
         """
@@ -259,6 +391,13 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 conn_str = _build_conn_str(config)
             except DatabaseConfig.DoesNotExist:
                 return Response({'error': 'DatabaseConfig not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        is_safe, validation_msg = validate_sql_security(query)
+        if not is_safe:
+            return Response(
+                {'columns': [], 'rows': [], 'execution_time_ms': 0, 'error': validation_msg},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         results, err, duration = execute_query(query, user_id=str(request.user.id), conn_str=conn_str)
 
@@ -313,6 +452,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 participant_query=query,
                 solution_query=question.solution_query,
                 conn_str=conn_str,
+                order_sensitive=question.order_sensitive,
             )
             return Response(eval_result)
         except Exception as e:
@@ -386,14 +526,60 @@ def user_detail_view(request, pk):
 
 # ─── Results ──────────────────────────────────────────────────────────────────
 
+def _attempt_to_history_item(a):
+    score = float(a.score) if a.score is not None else None
+    return {
+        'id': a.id,
+        'score': score,
+        'result_status': 'PASSED' if score is not None and score >= 70 else ('FAILED' if score is not None else 'PENDING'),
+        'submitted_at': a.submitted_at,
+        'submitted_date': a.submitted_at.strftime('%Y-%m-%d') if a.submitted_at else None,
+    }
+
+
 @api_view(['GET'])
 def results_view(request):
-    attempts = (
+    """
+    Returns one row per (participant, assessment) showing the best (highest-score) attempt.
+    Each row includes a `history` list of all attempts for that combination, ordered most-recent first.
+    """
+    from collections import defaultdict
+
+    all_attempts = (
         Attempt.objects
         .filter(submitted_at__isnull=False)
         .select_related('assignment', 'assignment__user', 'assignment__assessment')
+        .order_by('assignment__user_id', 'assignment__assessment_id', '-score', '-submitted_at')
     )
-    return Response(ResultSerializer(attempts, many=True).data)
+
+    # Group by (user_id, assessment_id)
+    grouped = defaultdict(list)
+    for attempt in all_attempts:
+        key = (attempt.assignment.user_id, attempt.assignment.assessment_id)
+        grouped[key].append(attempt)
+
+    rows = []
+    for attempt_list in grouped.values():
+        # Best attempt = highest score; ties broken by most recent submission
+        best = max(attempt_list, key=lambda a: (float(a.score) if a.score is not None else -1, a.submitted_at))
+        u = best.assignment.user
+        score = float(best.score) if best.score is not None else None
+        rows.append({
+            'id': best.id,
+            'participant_name': f'{u.first_name} {u.last_name}'.strip() or u.username,
+            'participant_email': u.email,
+            'assessment_name': best.assignment.assessment.name,
+            'score': score,
+            'result_status': 'PASSED' if score is not None and score >= 70 else ('FAILED' if score is not None else 'PENDING'),
+            'submitted_at': best.submitted_at,
+            'submitted_date': best.submitted_at.strftime('%Y-%m-%d') if best.submitted_at else None,
+            'attempts_count': len(attempt_list),
+            'history': [_attempt_to_history_item(a) for a in sorted(attempt_list, key=lambda a: a.submitted_at, reverse=True)],
+        })
+
+    # Sort final list: name asc, assessment asc
+    rows.sort(key=lambda r: (r['participant_name'].lower(), r['assessment_name'].lower()))
+    return Response(rows)
 
 
 # ─── Bulk assignment ──────────────────────────────────────────────────────────
