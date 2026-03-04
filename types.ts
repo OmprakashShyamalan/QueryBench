@@ -49,9 +49,10 @@ export interface Question {
   prompt: string;
   difficulty: 'EASY' | 'MEDIUM' | 'HARD';
   tags: string[];
-  environment_tag: string; 
+  environment_tag: string;
   expected_schema_ref: string;
   solution_query: string;
+  order_sensitive: boolean;
   schema_metadata?: SchemaMetadata;
 }
 

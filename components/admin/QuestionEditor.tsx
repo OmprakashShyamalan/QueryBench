@@ -14,7 +14,7 @@ interface Props {
 }
 
 export const QuestionEditor: React.FC<Props> = ({ item, targets, onSave, onCancel }) => {
-  const [editingItem, setEditingItem] = useState(item || { difficulty: 'EASY', tags: [], solution_query: '' });
+  const [editingItem, setEditingItem] = useState(item || { difficulty: 'EASY', tags: [], solution_query: '', order_sensitive: false });
   const [status, setStatus] = useState<{ type: 'idle' | 'validating' | 'success' | 'error', msg?: string }>({ type: 'idle' });
   const [isValidating, setIsValidating] = useState(false);
   // Ref always holds the latest query value; avoids reading stale closure state
@@ -111,6 +111,22 @@ export const QuestionEditor: React.FC<Props> = ({ item, targets, onSave, onCance
                  </button>
                ))}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Scoring Behaviour</label>
+            <label className="flex items-start gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition">
+              <input
+                type="checkbox"
+                checked={!!editingItem.order_sensitive}
+                onChange={e => setEditingItem({...editingItem, order_sensitive: e.target.checked})}
+                className="mt-0.5 accent-slate-900 w-4 h-4 shrink-0"
+              />
+              <span className="text-xs leading-relaxed">
+                <span className="font-bold text-slate-700 block mb-0.5">Order-sensitive grading</span>
+                <span className="text-slate-400">Row order must match the solution exactly. Enable only when the question explicitly tests ORDER BY.</span>
+              </span>
+            </label>
           </div>
 
           <div>
