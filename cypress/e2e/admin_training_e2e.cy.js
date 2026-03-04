@@ -29,14 +29,16 @@ describe('Admin Setup E2E — SQL Training', () => {
     email: `e2e_train_${ts}@example.com`,
   };
 
+  // Credentials loaded from cypress.env.json (gitignored — never committed).
+  // Copy cypress.env.json.example → cypress.env.json and fill in the values before running.
   const infra = {
     name: 'SQL_TRAINING',
-    host: '10.44.202.42',
+    host: Cypress.env('TRAINING_DB_HOST'),
     port: '1433',
     dbName: 'SQL_TRAINING',
     provider: 'SQL_SERVER',
-    username: 'TRAINING_CS',
-    password: 'TRAINING_CS',
+    username: Cypress.env('TRAINING_DB_USERNAME'),
+    password: Cypress.env('TRAINING_DB_PASSWORD'),
   };
 
   // ─── sql_store questions ──────────────────────────────────────────────────

@@ -45,3 +45,5 @@ db.sqlite3
 cypress/screenshots/
 cypress/videos/
 cypress/fixtures/e2e_session.json
+cypress/fixtures/e2e_session_training.json
+cypress.env.json

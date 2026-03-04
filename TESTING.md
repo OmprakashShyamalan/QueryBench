@@ -132,6 +132,16 @@ Before running, ensure:
 
 The `admin_training_e2e.cy.js` and `participant_training_e2e.cy.js` suites connect to an **internal SQL Server instance** that is only reachable from within the Sapiens corporate network (or VPN). They will time out if run from outside that network. The W3Schools suites (`admin_e2e.cy.js` / `participant_e2e.cy.js`) have no such restriction and can run locally at any time.
 
+**One-time setup before running training suites:**
+
+```bash
+# Copy the example file and fill in the real values (ask your team lead)
+cp cypress.env.json.example cypress.env.json
+# Then edit cypress.env.json with the actual host, username, and password
+```
+
+`cypress.env.json` is gitignored and will never be committed. The `cypress.env.json.example` file (committed) contains only placeholders.
+
 ### Suite 1 — Admin flow (`admin_e2e.cy.js`, 7 tests)
 
 | # | Test | What it does |
