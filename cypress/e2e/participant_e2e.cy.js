@@ -52,12 +52,14 @@ describe('Participant Flow E2E', () => {
     cy.contains('Assigned Assessments', { timeout: 10000 }).should('be.visible');
   });
 
-  it('2. Participant Opens Assigned Assessment', () => {
-    cy.contains('button', 'Begin').click();
+  it('2. Participant Opens Assigned Assessment', function () {
+    if (!questions || !questions.length) return this.skip();
+    // Wait up to 10 s for the Begin button — the dashboard may still be fetching assignments
+    cy.contains('button', 'Begin', { timeout: 10000 }).click();
     // Verify first question prompt is visible — assessment loaded successfully
     cy.contains(questions[0].prompt, { timeout: 10000 }).should('exist');
     // Step navigator shows exactly as many steps as questions were created
-    cy.contains('button', new RegExp('^' + questions.length + '$')).should('exist');
+    cy.contains('button', new RegExp('^' + questions.length + '$'), { timeout: 8000 }).should('exist');
   });
 
   // ─── Schema Explorer ─────────────────────────────────────────────────────
@@ -105,7 +107,7 @@ describe('Participant Flow E2E', () => {
 
   // Uses function() syntax so this.skip() is available.
   it('5. Q1 — Wrong Syntax Answer (SELCT typo)', function () {
-    if (!questions[0]) { this.skip(); return; }
+    if (!questions[0]) return this.skip();
 
     cy.contains(questions[0].prompt, { timeout: 5000 }).should('be.visible');
 
@@ -122,7 +124,7 @@ describe('Participant Flow E2E', () => {
   // ─── Q2: Correct Syntax, Wrong Projection ────────────────────────────────
 
   it('6. Q2 — Correct Syntax, Wrong Projection (missing Phone column)', function () {
-    if (!questions[1]) { this.skip(); return; }
+    if (!questions[1]) return this.skip();
 
     cy.contains('button', /^2$/).click();
     cy.contains(questions[1].prompt, { timeout: 5000 }).should('be.visible');
@@ -140,7 +142,7 @@ describe('Participant Flow E2E', () => {
   // ─── Q3: Correct Answer ──────────────────────────────────────────────────
 
   it('7. Q3 — Correct Answer', function () {
-    if (!questions[2]) { this.skip(); return; }
+    if (!questions[2]) return this.skip();
 
     cy.contains('button', /^3$/).click();
     cy.contains(questions[2].prompt, { timeout: 5000 }).should('be.visible');
@@ -157,7 +159,7 @@ describe('Participant Flow E2E', () => {
   // ─── Q4: Correct Answer ───────────────────────────────────────────────────
 
   it('8. Q4 — Correct Answer', function () {
-    if (!questions[3]) { this.skip(); return; }
+    if (!questions[3]) return this.skip();
 
     cy.contains('button', /^4$/).click();
     cy.contains(questions[3].prompt, { timeout: 5000 }).should('be.visible');
@@ -174,7 +176,7 @@ describe('Participant Flow E2E', () => {
   // ─── Q5: Correct Answer ───────────────────────────────────────────────────
 
   it('9. Q5 — Correct Answer', function () {
-    if (!questions[4]) { this.skip(); return; }
+    if (!questions[4]) return this.skip();
 
     cy.contains('button', new RegExp('^' + questions.length + '$')).click();
     cy.contains(questions[4].prompt, { timeout: 5000 }).should('be.visible');

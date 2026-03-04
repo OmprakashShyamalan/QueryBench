@@ -437,7 +437,7 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
   const currentQuestion: ApiQuestion = assessment.questions_data[currentQuestionIndex];
   const currentQuery = queries[currentQuestion.id] || '';
   const filteredTables = schema?.tables.filter(t =>
-    t.qualifiedName.toLowerCase().includes(schemaSearch.toLowerCase())
+    (t.qualifiedName ?? t.name).toLowerCase().includes(schemaSearch.toLowerCase())
   ) || [];
 
   return (
