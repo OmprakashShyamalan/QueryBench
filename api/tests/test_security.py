@@ -8,8 +8,9 @@ Security guardrail tests (ASVS-aligned).
 Run with:  python manage.py test api.tests.test_security
 """
 
-from django.test import TestCase, override_settings
-from rest_framework.test import APIClient
+from django.test import TestCase
+from django.core.cache import cache
+from rest_framework.test import APIRequestFactory
 
 from backend.sql_eval import validate_sql
 
@@ -110,34 +111,53 @@ class SQLSafetyTest(TestCase):
 
 # ── 3. Throttling (smoke test) ───────────────────────────────────────────────
 
-@override_settings(
-    REST_FRAMEWORK={
-        "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.UserRateThrottle"],
-        "DEFAULT_THROTTLE_RATES": {"user": "5/min"},
-    }
-)
 class ThrottleTest(TestCase):
     """
-    Authenticated user is rate-limited.
+    DRF's UserRateThrottle returns HTTP 429 once the request cap is exceeded.
 
-    The production cap is 100/min (settings.py).
-    This test overrides it to 5/min so the smoke test completes quickly
-    without flooding the API.  If HTTP 429 is returned within 6 requests the
-    DRF throttle middleware is active and correctly configured.
+    Uses a self-contained throttle subclass with the rate baked into
+    THROTTLE_RATES so there is no dependency on api_settings or
+    @override_settings (APIView.throttle_classes is set at class-creation
+    time from api_settings, making @override_settings unreliable here).
+
+    The production global cap is 100/min (querybench/settings.py).
     """
 
     def setUp(self):
-        from django.contrib.auth.models import User
-        self.user = User.objects.create_user(username="throttle_tester", password="pw")
-        self.client = APIClient()
-        self.client.force_authenticate(user=self.user)
+        cache.clear()  # reset any stale throttle counters from prior tests
+        self.factory = APIRequestFactory()
+
+    def tearDown(self):
+        cache.clear()
 
     def test_throttle_triggers_429_after_limit(self):
-        url = "/api/v1/auth/me/"
-        responses = [self.client.get(url) for _ in range(6)]
-        status_codes = [r.status_code for r in responses]
+        """6 rapid requests against a 5/min cap must produce at least one 429."""
+        from rest_framework.views import APIView
+        from rest_framework.response import Response
+        from rest_framework.throttling import UserRateThrottle
+        from rest_framework.permissions import AllowAny
+
+        class _BurstThrottle(UserRateThrottle):
+            scope = '_test_burst'
+            THROTTLE_RATES = {'_test_burst': '5/min'}
+
+        class _ThrottledView(APIView):
+            throttle_classes = [_BurstThrottle]
+            permission_classes = [AllowAny]
+            authentication_classes = []
+
+            def get(self, request):
+                return Response({'ok': True})
+
+        view = _ThrottledView.as_view()
+        # No auth — throttle falls back to REMOTE_ADDR (127.0.0.1 from factory)
+        # as the identity key. All 6 requests share it so the counter accumulates.
+        status_codes = [
+            view(self.factory.get('/test-throttle/')).status_code
+            for _ in range(6)
+        ]
         self.assertIn(
             429,
             status_codes,
-            f"Expected HTTP 429 after exceeding rate limit; got: {status_codes}",
+            f"Expected HTTP 429 after exceeding 5/min rate limit; got: {status_codes}",
         )

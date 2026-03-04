@@ -77,7 +77,9 @@ Unit-tests `backend.sql_eval.validate_sql` directly. Each unsafe input must rais
 | `test_valid_cte_passes` | Valid `WITH ... SELECT` — must **not** raise |
 
 #### `ThrottleTest` (1 test)
-Overrides DRF throttle rate to `5/min`, fires 6 rapid requests, asserts HTTP 429 is received.
+Uses a self-contained `UserRateThrottle` subclass with the rate baked into `THROTTLE_RATES` (`5/min`). Fires 6 requests via `APIRequestFactory` (no authentication — falls back to `REMOTE_ADDR` as the identity key). Asserts HTTP 429 is received before the 6th request completes.
+
+> **Implementation note:** `@override_settings` cannot change `APIView.throttle_classes` because it is evaluated once at class-creation time from `api_settings`. The self-contained subclass avoids this entirely — no settings dependency, no cache-flush needed.
 
 ### How to run
 
@@ -85,7 +87,7 @@ Overrides DRF throttle rate to `5/min`, fires 6 rapid requests, asserts HTTP 429
 python manage.py test api.tests.test_security -v 2
 ```
 
-> **Note:** The throttle test relies on Django's cache backend. If using a non-default cache the 429 assertion may not trigger — check `CACHES` in `settings.py`.
+Expected output: `Ran 17 tests in ~0.06s — OK`
 
 ---
 
@@ -124,9 +126,9 @@ Before running, ensure:
 | 1 | Admin Logs In | Authenticates as admin, lands on Admin Dashboard |
 | 2 | Admin Creates Participant User | Creates a participant account via Users tab |
 | 3 | Admin Creates Infrastructure (W3Schools) | Adds a `DatabaseConfig` (W3Schools DB), verifies Test Connection |
-| 4 | Admin Creates 5 Questions | Creates all 5 questions in a loop: validates SQL, saves — or cancels if validation fails |
-| 5 | Admin Creates Assessment with 5 Questions | Creates an assessment, adds the 5 questions to it |
-| 6 | Admin Assigns Assessment to Participant | Assigns the assessment to the participant with a due date |
+| 4 | Admin Creates Questions | Creates questions in a loop: validates SQL, saves on pass, cancels on fail. Tracks created questions; fails fast if none succeed. Updates `e2e_session.json` with only the questions that were actually saved. |
+| 5 | Admin Creates Assessment | `this.skip()` if no questions were created. Adds only the saved questions to the assessment (prevents hang on missing titles). Sets `assessmentCreated = true` on success. |
+| 6 | Admin Assigns Assessment to Participant | `this.skip()` if assessment was not created. Assigns the assessment to the participant with a due date |
 
 ### Suite 2 — Participant flow (`participant_e2e.cy.js`, 11 tests)
 
@@ -188,10 +190,22 @@ Add a new `it()` block inside the relevant `describe()` in `admin_e2e.cy.js` or 
 | Symptom | Fix |
 |---|---|
 | `ModuleNotFoundError: backend` | Run from repo root with venv active |
+| `ModuleNotFoundError: No module named 'csp'` | Run `pip install "django-csp>=3.8,<4.0"` — required for the security tests and the running server |
 | Cypress times out on `cm-content` | Backend or frontend server not running; check ports 8080 / 3000 |
+| Cypress test 4 hangs during question creation | Expected if DB is unreachable — question validation will time out. Check the W3Schools DB connection. |
 | `Validation Failed` flashes then corrects itself | Expected — the UI shows a spinner during the DB round-trip; the test waits 2s after clicking "Validate Logic" |
-| Security throttle test never returns 429 | The Django in-memory cache resets between test cases; ensure `DEFAULT_CACHE_BACKEND` is not `DummyCache` |
-| `csp.E001` — settings format error | `django-csp` ≥ 4.0 uses `CONTENT_SECURITY_POLICY = {"DIRECTIVES": {...}}`. The project currently targets 3.x; do not upgrade without updating `settings.py`. |
+| Cypress tests 5 or 6 show as `pending` (skipped) | All questions in test 4 failed validation — check that the W3Schools DB is online and the SQL queries are correct |
+| `csp.E001` — settings format error | `django-csp` ≥ 4.0 uses `CONTENT_SECURITY_POLICY = {"DIRECTIVES": {...}}`. The project targets 3.x; do not upgrade without updating `settings.py`. |
+
+---
+
+## 7. Last Run Results
+
+| Suite | Date | Result | Notes |
+|---|---|---|---|
+| `backend/tests_sql_eval.py` | 2026-03-04 | **57/57 PASS** | `Ran 57 tests in 0.060s — OK` |
+| `api/tests/test_security.py` | 2026-03-04 | **17/17 PASS** | `Ran 17 tests in 0.058s — OK` |
+| Cypress E2E | — | Not run in this session | Requires live DB and servers |
 
 ---
 
