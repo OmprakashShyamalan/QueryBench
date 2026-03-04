@@ -114,6 +114,14 @@ export interface ApiAssignment {
   created_at: string;
 }
 
+export interface ApiResultHistoryItem {
+  id: number;
+  score: number | null;
+  result_status: 'PASSED' | 'FAILED' | 'PENDING';
+  submitted_at: string;
+  submitted_date: string | null;
+}
+
 export interface ApiResult {
   id: number;
   participant_name: string;
@@ -123,6 +131,10 @@ export interface ApiResult {
   result_status: 'PASSED' | 'FAILED' | 'PENDING';
   submitted_at: string;
   submitted_date: string | null;
+  /** Number of total submitted attempts for this (participant, assessment) pair. */
+  attempts_count: number;
+  /** All submitted attempts, ordered most-recent first. The best attempt is at index 0 of the sorted list. */
+  history: ApiResultHistoryItem[];
 }
 
 export interface ApiAttempt {
@@ -131,6 +143,25 @@ export interface ApiAttempt {
   started_at: string;
   submitted_at: string | null;
   score: number | null;
+  /** Seconds remaining, computed server-side from started_at + assessment duration. */
+  time_remaining_seconds: number;
+  /** True when the participant closed the tab mid-attempt. Prevents resuming. */
+  is_session_closed: boolean;
+}
+
+export interface ApiAttemptAnswer {
+  id: number;
+  attempt: number;
+  question: number;
+  participant_query: string;
+  status: 'CORRECT' | 'INCORRECT' | 'NOT_ATTEMPTED';
+  execution_time_ms: number | null;
+  error_message: string;
+  feedback: string;
+}
+
+export interface ApiAttemptDetail extends ApiAttempt {
+  answers: ApiAttemptAnswer[];
 }
 
 export interface ApiSubmitResult {
@@ -186,6 +217,8 @@ export const configsApi = {
     apiFetch<ApiDatabaseConfig>(`/configs/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
   delete: (id: number) =>
     apiFetch<void>(`/configs/${id}/`, { method: 'DELETE' }),
+  testConnection: (data: { host: string; port: number; database_name: string; trusted_connection: boolean; username?: string; password_secret_ref?: string }) =>
+    apiFetch<{ success: boolean; message: string }>('/configs/test_connection/', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 export const questionsApi = {
@@ -230,6 +263,7 @@ export const assignmentsApi = {
 };
 
 export const attemptsApi = {
+  get: (id: number) => apiFetch<ApiAttemptDetail>(`/attempts/${id}/`),
   runQuery: (query: string, configId?: number) =>
     apiFetch<ApiQueryResult>('/attempts/run_query/', {
       method: 'POST',
@@ -250,7 +284,13 @@ export const attemptsApi = {
 };
 
 export const schemaApi = {
-  get: (configId: number) => apiFetch<ApiSchema>(`/schema/?config_id=${configId}`),
+  get: (configId: number, questionId?: number) => {
+    let url = `/schema/?config_id=${configId}`;
+    if (questionId !== undefined) {
+      url += `&question_id=${questionId}`;
+    }
+    return apiFetch<ApiSchema>(url);
+  },
 };
 
 export const resultsApi = {
@@ -280,4 +320,20 @@ export const usersApi = {
   resetPassword: (id: number, password: string) =>
     apiFetch<ApiParticipant>(`/users/${id}/`, { method: 'PATCH', body: JSON.stringify({ password }) }),
   delete: (id: number) => apiFetch<void>(`/users/${id}/`, { method: 'DELETE' }),
+  bulkImport: (users: {
+    username: string; email: string; password: string;
+    first_name?: string; last_name?: string; role: 'ADMIN' | 'PARTICIPANT';
+  }[]) =>
+    apiFetch<{ created: ApiParticipant[]; errors: { username: string; error: string }[] }>(
+      '/users/bulk_import/',
+      { method: 'POST', body: JSON.stringify({ users }) },
+    ),
+};
+
+export const assignmentsTextApi = {
+  bulkAssignByText: (assessmentId: number, identifiers: string[], dueDate: string) =>
+    apiFetch<{ created: ApiAssignment[]; errors: { identifier: string; error: string }[] }>(
+      '/assignments/bulk_assign_by_text/',
+      { method: 'POST', body: JSON.stringify({ assessment_id: assessmentId, identifiers, due_date: dueDate }) },
+    ),
 };

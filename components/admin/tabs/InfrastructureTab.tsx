@@ -7,9 +7,10 @@ interface Props {
   targets: DatabaseConfig[];
   onAdd: () => void;
   onEdit: (t: DatabaseConfig) => void;
+  onDelete: (t: DatabaseConfig) => void;
 }
 
-export const InfrastructureTab: React.FC<Props> = ({ targets, onAdd, onEdit }) => {
+export const InfrastructureTab: React.FC<Props> = ({ targets, onAdd, onEdit, onDelete }) => {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -34,9 +35,14 @@ export const InfrastructureTab: React.FC<Props> = ({ targets, onAdd, onEdit }) =
                   <p className="text-[10px] font-mono text-slate-400">{target.host}:{target.port}</p>
                 </div>
               </div>
-              <button onClick={() => onEdit(target)} className="p-2 text-slate-400 hover:text-blue-600 transition">
-                <Settings className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button onClick={() => onEdit(target)} className="p-2 text-slate-400 hover:text-blue-600 transition" title="Edit">
+                  <Settings className="w-4 h-4" />
+                </button>
+                <button onClick={() => onDelete(target)} className="p-2 text-slate-400 hover:text-red-600 transition" title="Delete">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 px-2 py-1 rounded w-fit">
               <Server className="w-3 h-3" /> {target.provider}

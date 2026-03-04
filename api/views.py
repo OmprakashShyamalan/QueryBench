@@ -399,7 +399,14 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        results, err, duration = execute_query(query, user_id=str(request.user.id), conn_str=conn_str)
+        try:
+            results, err, duration = execute_query(query, user_id=str(request.user.id), conn_str=conn_str)
+        except Exception as e:
+            logger.error(f"run_query unexpected error for user {request.user.id}: {e}", exc_info=True)
+            return Response(
+                {'columns': [], 'rows': [], 'execution_time_ms': 0, 'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         if err:
             # Return the error message from the backend for user feedback
@@ -466,6 +473,53 @@ class AttemptViewSet(viewsets.ModelViewSet):
 class DatabaseConfigViewSet(viewsets.ModelViewSet):
     queryset = DatabaseConfig.objects.all()
     serializer_class = DatabaseConfigSerializer
+
+    @action(detail=False, methods=['post'])
+    def test_connection(self, request):
+        """
+        Tests a database connection with the supplied parameters, without persisting anything.
+        Always returns HTTP 200; the response body carries { success, message }.
+        """
+        import pyodbc  # local import — keeps startup fast if pyodbc absent
+
+        host = (request.data.get('host') or '').strip()
+        database_name = (request.data.get('database_name') or '').strip()
+        port = request.data.get('port', 1433)
+        trusted = request.data.get('trusted_connection', False)
+        username = (request.data.get('username') or '').strip()
+        password = (request.data.get('password_secret_ref') or '').strip()
+
+        if not host or not database_name:
+            return Response({'success': False, 'message': 'Host and database name are required.'})
+
+        if trusted:
+            conn_str = (
+                f"Driver={{ODBC Driver 17 for SQL Server}};"
+                f"Server={host};"
+                f"Database={database_name};"
+                f"Trusted_Connection=yes;"
+            )
+        else:
+            if not username:
+                return Response({'success': False, 'message': 'Username is required for SQL auth connections.'})
+            conn_str = (
+                f"Driver={{ODBC Driver 17 for SQL Server}};"
+                f"Server={host};"
+                f"Database={database_name};"
+                f"UID={username};"
+                f"PWD={password};"
+            )
+
+        if port and port != 1433 and '\\' not in host:
+            conn_str = conn_str.replace(f"Server={host};", f"Server={host},{port};")
+
+        try:
+            conn = pyodbc.connect(conn_str, timeout=5)
+            conn.cursor().execute("SELECT 1")
+            conn.close()
+            return Response({'success': True, 'message': f'Connected to {database_name} on {host}.'})
+        except Exception as e:
+            return Response({'success': False, 'message': str(e)[:300]})
 
 
 # ─── User management ──────────────────────────────────────────────────────────

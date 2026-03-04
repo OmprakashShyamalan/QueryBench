@@ -19,6 +19,7 @@ import {
   configsApi, questionsApi, assessmentsApi, assignmentsApi, resultsApi, usersApi,
   ApiDatabaseConfig, ApiQuestion, ApiAssessment, ApiAssignment, ApiResult, ApiParticipant,
 } from '../../services/api';
+import { Download } from 'lucide-react';
 
 // ─── Mappers: API response → frontend types ──────────────────────────────────
 
@@ -92,7 +93,7 @@ function mapAssignment(a: ApiAssignment, assessments: AssessmentWithId[]): Assig
 
 const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'assessments' | 'assignments' | 'results' | 'questions' | 'infrastructure' | 'users'>('assessments');
-  const [modal, setModal] = useState<{ type: 'question' | 'bulk' | 'delete' | 'assessment' | 'assign' | 'edit_assignment' | 'bulkQuestionEnv' | 'infrastructure' | 'create_user' | 'reset_password' | null; data: any }>({ type: null, data: null });
+  const [modal, setModal] = useState<{ type: 'question' | 'bulk' | 'delete' | 'assessment' | 'assign' | 'edit_assignment' | 'bulkQuestionEnv' | 'infrastructure' | 'create_user' | 'reset_password' | 'bulk_import_users' | null; data: any }>({ type: null, data: null });
   const [bulkEnvTarget, setBulkEnvTarget] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -108,12 +109,11 @@ const AdminDashboard: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const [cfgs, qs, as, asgns, res, us] = await Promise.all([
+      const [cfgs, qs, as, asgns, us] = await Promise.all([
         configsApi.list(),
         questionsApi.list(),
         assessmentsApi.list(),
         assignmentsApi.list(),
-        resultsApi.list(),
         usersApi.list(),
       ]);
       const mappedCfgs = cfgs.map(mapConfig);
@@ -124,7 +124,6 @@ const AdminDashboard: React.FC = () => {
       setQuestions(mappedQs);
       setAssessments(mappedAs);
       setAssignments(mappedAsgns);
-      setResults(res);
       setUsers(us);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load data.');
@@ -134,6 +133,19 @@ const AdminDashboard: React.FC = () => {
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // Lazy-load results only when the Results tab becomes active
+  const [resultsLoading, setResultsLoading] = useState(false);
+  const [resultsError, setResultsError] = useState<string | null>(null);
+  useEffect(() => {
+    if (activeTab !== 'results') return;
+    setResultsLoading(true);
+    setResultsError(null);
+    resultsApi.list()
+      .then(setResults)
+      .catch(e => setResultsError(e instanceof Error ? e.message : 'Failed to load results.'))
+      .finally(() => setResultsLoading(false));
+  }, [activeTab]);
 
   // ─── Question handlers ──────────────────────────────────────────────────
 
@@ -154,8 +166,8 @@ const AdminDashboard: React.FC = () => {
       } else {
         await questionsApi.create(payload);
       }
-      await loadAll();
       setModal({ type: null, data: null });
+      await loadAll();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Failed to save question.');
     }
@@ -164,8 +176,8 @@ const AdminDashboard: React.FC = () => {
   const handleDeleteQuestion = async (q: QuestionWithId) => {
     try {
       await questionsApi.delete(q._id);
-      await loadAll();
       setModal({ type: null, data: null });
+      await loadAll();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Failed to delete question.');
     }
@@ -207,8 +219,8 @@ const AdminDashboard: React.FC = () => {
         .map((q: any) => q._id)
         .filter((id: any) => typeof id === 'number');
       await assessmentsApi.setQuestions(saved.id, questionIds);
-      await loadAll();
       setModal({ type: null, data: null });
+      await loadAll();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Failed to save assessment.');
     }
@@ -226,20 +238,31 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // ─── Infrastructure handlers ────────────────────────────────────────────
+
+  const handleDeleteTarget = async (t: ConfigWithId) => {
+    if (!window.confirm(`Delete "${t.database_name}"? This cannot be undone.`)) return;
+    try {
+      await configsApi.delete(t._id);
+      await loadAll();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Failed to delete target.');
+    }
+  };
+
   // ─── Assignment handlers ────────────────────────────────────────────────
 
-  const handleBulkAssign = async (assessmentId: string, userIds: number[]) => {
+  const handleBulkAssign = async (assessmentId: string, userIds: number[], dueDate: string) => {
     const assessment = assessments.find(a => a.id === assessmentId);
     if (!assessment) return;
-    const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     try {
       const result = await assignmentsApi.bulkAssign(assessment._id, userIds, dueDate);
       if (result.errors.length > 0) {
         const msgs = result.errors.map(e => `User ${(e as any).user_id}: ${e.error}`).join('\n');
         alert(`Some assignments could not be created:\n${msgs}`);
       }
-      await loadAll();
       setModal({ type: null, data: null });
+      await loadAll();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Failed to assign.');
     }
@@ -251,8 +274,8 @@ const AdminDashboard: React.FC = () => {
         status: updates.status as any,
         due_date: updates.due_date,
       });
-      await loadAll();
       setModal({ type: null, data: null });
+      await loadAll();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Failed to update assignment.');
     }
@@ -282,6 +305,19 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleBulkEnvChange = async (ids: string[], newTarget: string) => {
+    try {
+      await Promise.all(ids.map(id => {
+        const q = questions.find(q => q.id === id);
+        return q ? questionsApi.update(q._id, { expected_schema_ref: newTarget }) : Promise.resolve();
+      }));
+      setModal({ type: null, data: null });
+      await loadAll();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Failed to update questions.');
+    }
+  };
+
   // ─── User handlers ──────────────────────────────────────────────────────
 
   const handleCreateUser = async (form: {
@@ -290,8 +326,8 @@ const AdminDashboard: React.FC = () => {
   }) => {
     try {
       await usersApi.create(form);
-      await loadAll();
       setModal({ type: null, data: null });
+      await loadAll();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Failed to create user.');
     }
@@ -398,13 +434,27 @@ const AdminDashboard: React.FC = () => {
           />
         )}
 
-        {activeTab === 'results' && <ResultsTab results={results} />}
+        {activeTab === 'results' && (
+          resultsLoading ? (
+            <div className="flex items-center justify-center h-64 gap-3 text-slate-400">
+              <RefreshCw className="w-5 h-5 animate-spin" />
+              <span className="text-sm font-medium">Loading results...</span>
+            </div>
+          ) : resultsError ? (
+            <div className="max-w-lg mx-auto mt-8 p-6 bg-red-50 border border-red-200 rounded-2xl text-center">
+              <p className="text-sm font-bold text-red-700">{resultsError}</p>
+            </div>
+          ) : (
+            <ResultsTab results={results} questions={questions} />
+          )
+        )}
 
         {activeTab === 'infrastructure' && (
           <InfrastructureTab
             targets={targets}
             onAdd={() => setModal({ type: 'infrastructure', data: { provider: 'SQL_SERVER', port: 1433 } })}
             onEdit={(t) => setModal({ type: 'infrastructure', data: t })}
+            onDelete={(t: ConfigWithId) => handleDeleteTarget(t)}
           />
         )}
 
@@ -427,12 +477,20 @@ const AdminDashboard: React.FC = () => {
                 <h2 className="text-lg font-bold text-slate-900">Users</h2>
                 <p className="text-xs text-slate-400 mt-0.5">Manage participant and admin accounts</p>
               </div>
-              <button
-                onClick={() => setModal({ type: 'create_user', data: null })}
-                className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors"
-              >
-                <Plus className="w-4 h-4" /> Add User
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setModal({ type: 'bulk_import_users', data: null })}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 border border-slate-200 transition-colors"
+                >
+                  <Upload className="w-4 h-4" /> Bulk Import
+                </button>
+                <button
+                  onClick={() => setModal({ type: 'create_user', data: null })}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors"
+                >
+                  <Plus className="w-4 h-4" /> Add User
+                </button>
+              </div>
             </div>
 
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
@@ -573,15 +631,25 @@ const AdminDashboard: React.FC = () => {
         icon={<Upload className="w-6 h-6 text-blue-600" />}
       >
         <BulkUpload
-          onUpload={async (rows) => {
+          onUpload={async (csvText) => {
             try {
-              await Promise.all(rows.map((r: any) => questionsApi.create({
+              const lines = csvText.trim().split('\n').filter((l: string) => l.trim());
+              if (lines.length < 2) { alert('No data rows found. Check your CSV format.'); return; }
+              const headers = lines[0].split(',').map((h: string) => h.trim());
+              const rows = lines.slice(1).map((line: string) => {
+                const values = line.split(',').map((v: string) => v.trim());
+                const obj: Record<string, string> = {};
+                headers.forEach((h: string, i: number) => { obj[h] = values[i] || ''; });
+                return obj;
+              });
+              await Promise.all(rows.map((r) => questionsApi.create({
                 title: r.title,
                 prompt: r.prompt,
-                difficulty: r.difficulty,
-                tags: (r.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean),
+                difficulty: ((r.difficulty?.toUpperCase() || 'EASY') as 'EASY' | 'MEDIUM' | 'HARD'),
+                tags: (r.tags || '').split(';').map((t: string) => t.trim()).filter(Boolean),
                 expected_schema_ref: r.environment_tag || '',
                 solution_query: r.solution_query,
+                is_validated: false,
                 created_by: null,
               })));
               await loadAll();
@@ -609,8 +677,8 @@ const AdminDashboard: React.FC = () => {
               } else {
                 await configsApi.create(data);
               }
-              await loadAll();
               setModal({ type: null, data: null });
+              await loadAll();
             } catch (e: unknown) {
               alert(e instanceof Error ? e.message : 'Failed to save config.');
             }
@@ -642,6 +710,63 @@ const AdminDashboard: React.FC = () => {
           onCancel={() => setModal({ type: null, data: null })}
         />
       </Modal>
+
+      <Modal
+        isOpen={modal.type === 'bulkQuestionEnv'}
+        onClose={() => setModal({ type: null, data: null })}
+        title={`Change Target (${(modal.data as string[] | null)?.length ?? 0} questions)`}
+        icon={<RefreshCw className="w-6 h-6 text-blue-600" />}
+      >
+        <div className="space-y-5">
+          <p className="text-sm text-slate-500">
+            Select a new database target for the <strong>{(modal.data as string[] | null)?.length}</strong> selected question{(modal.data as string[] | null)?.length !== 1 ? 's' : ''}.
+          </p>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Target Database</label>
+            <select
+              value={bulkEnvTarget}
+              onChange={e => setBulkEnvTarget(e.target.value)}
+              className="w-full p-3 bg-blue-50 border border-blue-200 rounded-xl outline-none font-bold text-blue-700 text-sm"
+            >
+              <option value="">Select Target...</option>
+              {targets.map(t => <option key={t.database_name} value={t.database_name}>{t.database_name}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-4">
+            <button onClick={() => setModal({ type: null, data: null })} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold text-sm">Cancel</button>
+            <button
+              onClick={() => bulkEnvTarget && handleBulkEnvChange(modal.data as string[], bulkEnvTarget)}
+              disabled={!bulkEnvTarget}
+              className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-700 transition"
+            >
+              Apply Changes
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={modal.type === 'bulk_import_users'}
+        onClose={() => setModal({ type: null, data: null })}
+        title="Bulk Import Users"
+        icon={<Upload className="w-6 h-6 text-blue-600" />}
+        maxWidth="max-w-2xl"
+      >
+        <BulkImportUsersForm
+          onImport={async (rows) => {
+            try {
+              const res = await usersApi.bulkImport(rows);
+              const msg = `${res.created.length} user(s) created.${res.errors.length ? `\n\nErrors:\n${res.errors.map(e => `• ${e.username}: ${e.error}`).join('\n')}` : ''}`;
+              alert(msg);
+              await loadAll();
+              if (res.errors.length === 0) setModal({ type: null, data: null });
+            } catch (e: unknown) {
+              alert(e instanceof Error ? e.message : 'Bulk import failed.');
+            }
+          }}
+          onCancel={() => setModal({ type: null, data: null })}
+        />
+      </Modal>
     </div>
   );
 };
@@ -649,6 +774,7 @@ const AdminDashboard: React.FC = () => {
 // ─── Inline infra config form ────────────────────────────────────────────────
 
 const InfraConfigForm: React.FC<{ initial: any; onSave: (d: any) => void; onCancel: () => void }> = ({ initial, onSave, onCancel }) => {
+  const isNew = !initial?._id;
   const [form, setForm] = useState({
     _id: initial?._id,
     config_name: initial?.config_name ?? initial?.database_name ?? '',
@@ -660,27 +786,52 @@ const InfraConfigForm: React.FC<{ initial: any; onSave: (d: any) => void; onCanc
     password_secret_ref: initial?.password_secret_ref ?? '',
     provider: initial?.provider ?? 'SQL_SERVER',
   });
-  const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>(isNew ? 'idle' : 'ok');
+  const [testMsg, setTestMsg] = useState('');
+
+  // Reset test whenever a connection-relevant field changes
+  const set = (k: string, v: any) => {
+    setForm((f: typeof form) => ({ ...f, [k]: v }));
+    setTestStatus('idle');
+    setTestMsg('');
+  };
+
+  const handleTest = async () => {
+    setTestStatus('testing');
+    setTestMsg('');
+    try {
+      const res = await configsApi.testConnection({
+        host: form.host,
+        port: form.port,
+        database_name: form.database_name,
+        trusted_connection: form.trusted_connection,
+        username: form.username,
+        password_secret_ref: form.password_secret_ref,
+      });
+      setTestStatus(res.success ? 'ok' : 'fail');
+      setTestMsg(res.message);
+    } catch (e: unknown) {
+      setTestStatus('fail');
+      setTestMsg(e instanceof Error ? e.message : 'Test failed.');
+    }
+  };
+
+  const canSave = !isNew || testStatus === 'ok';
 
   return (
     <div className="space-y-6">
-      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex items-center gap-3">
-        <Activity className="w-5 h-5 text-emerald-500" />
-        <p className="text-xs text-slate-500">Connections are validated via the Secure Evaluation Gateway.</p>
-      </div>
-
       <div className="grid grid-cols-2 gap-4">
         <div className="col-span-2">
           <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Display Name</label>
-          <input value={form.config_name} onChange={e => set('config_name', e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm" />
+          <input name="config_name" value={form.config_name} onChange={e => set('config_name', e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm" />
         </div>
         <div>
           <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Database Name</label>
-          <input value={form.database_name} onChange={e => set('database_name', e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-xs" />
+          <input name="database_name" value={form.database_name} onChange={e => set('database_name', e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-xs" />
         </div>
         <div>
           <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Provider</label>
-          <select value={form.provider} onChange={e => set('provider', e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm">
+          <select name="provider" value={form.provider} onChange={e => set('provider', e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm">
             <option>SQL_SERVER</option>
             <option>POSTGRES</option>
             <option>SQLITE</option>
@@ -688,11 +839,11 @@ const InfraConfigForm: React.FC<{ initial: any; onSave: (d: any) => void; onCanc
         </div>
         <div>
           <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Host</label>
-          <input value={form.host} onChange={e => set('host', e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-xs" />
+          <input name="host" value={form.host} onChange={e => set('host', e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-xs" />
         </div>
         <div>
           <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Port</label>
-          <input type="number" value={form.port} onChange={e => set('port', Number(e.target.value))} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm" />
+          <input name="port" type="text" inputMode="numeric" value={form.port} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { const v = e.target.value.replace(/\D/g, ''); set('port', v === '' ? 0 : Number(v)); }} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm" />
         </div>
       </div>
 
@@ -717,6 +868,7 @@ const InfraConfigForm: React.FC<{ initial: any; onSave: (d: any) => void; onCanc
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Username</label>
               <input
+                name="username"
                 value={form.username}
                 onChange={e => set('username', e.target.value)}
                 placeholder="sa"
@@ -726,6 +878,7 @@ const InfraConfigForm: React.FC<{ initial: any; onSave: (d: any) => void; onCanc
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Password</label>
               <input
+                name="password_secret_ref"
                 type="password"
                 value={form.password_secret_ref}
                 onChange={e => set('password_secret_ref', e.target.value)}
@@ -744,9 +897,34 @@ const InfraConfigForm: React.FC<{ initial: any; onSave: (d: any) => void; onCanc
         )}
       </div>
 
+      {/* Test connection */}
+      <div className="flex items-center gap-4">
+        <button
+          type="button"
+          onClick={handleTest}
+          disabled={testStatus === 'testing' || !form.host || !form.database_name}
+          className="px-5 py-2.5 bg-slate-100 border border-slate-200 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-2"
+        >
+          {testStatus === 'testing' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
+          {testStatus === 'testing' ? 'Testing…' : 'Test Connection'}
+        </button>
+        {testMsg && (
+          <p className={`text-xs font-semibold ${testStatus === 'ok' ? 'text-emerald-600' : 'text-red-500'}`}>
+            {testStatus === 'ok' ? '✓' : '✗'} {testMsg}
+          </p>
+        )}
+      </div>
+
       <div className="flex gap-4 pt-2">
         <button onClick={onCancel} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold text-sm">Cancel</button>
-        <button onClick={() => onSave(form)} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm">Save Configuration</button>
+        <button
+          onClick={() => canSave && onSave(form)}
+          disabled={!canSave}
+          title={isNew && testStatus !== 'ok' ? 'Test the connection before saving' : undefined}
+          className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-700 transition"
+        >
+          Save Configuration
+        </button>
       </div>
     </div>
   );
@@ -768,22 +946,22 @@ const UserCreateForm: React.FC<{
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">First Name</label>
-          <input value={form.first_name} onChange={e => set('first_name', e.target.value)} placeholder="Jane" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm" />
+          <input name="first_name" value={form.first_name} onChange={e => set('first_name', e.target.value)} placeholder="Jane" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm" />
         </div>
         <div>
           <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Last Name</label>
-          <input value={form.last_name} onChange={e => set('last_name', e.target.value)} placeholder="Doe" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm" />
+          <input name="last_name" value={form.last_name} onChange={e => set('last_name', e.target.value)} placeholder="Doe" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm" />
         </div>
       </div>
 
       <div>
         <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Username <span className="text-red-400">*</span></label>
-        <input value={form.username} onChange={e => set('username', e.target.value)} placeholder="jdoe" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-sm" />
+        <input name="username" value={form.username} onChange={e => set('username', e.target.value)} placeholder="jdoe" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-sm" />
       </div>
 
       <div>
         <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Email</label>
-        <input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="jane.doe@company.com" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm" />
+        <input name="email" type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="jane.doe@company.com" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm" />
       </div>
 
       <div>
@@ -791,6 +969,7 @@ const UserCreateForm: React.FC<{
         <div className="relative">
           <input
             type={showPw ? 'text' : 'password'}
+            name="password"
             value={form.password}
             onChange={e => set('password', e.target.value)}
             placeholder="Min 8 characters"
@@ -863,6 +1042,135 @@ const ResetPasswordForm: React.FC<{ onSave: (pw: string) => void; onCancel: () =
           className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Reset Password
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ─── Bulk import users form ───────────────────────────────────────────────────
+
+const USER_CSV_TEMPLATE = `first_name,last_name,username,email,password,role
+Jane,Doe,jdoe,jane.doe@company.com,Temp@1234,PARTICIPANT
+John,Smith,jsmith,john.smith@company.com,Temp@1234,PARTICIPANT
+Admin,User,admin2,admin@company.com,Admin@1234,ADMIN`;
+
+type UserRow = {
+  username: string; email: string; password: string;
+  first_name: string; last_name: string; role: 'ADMIN' | 'PARTICIPANT';
+};
+
+const BulkImportUsersForm: React.FC<{
+  onImport: (rows: UserRow[]) => Promise<void>;
+  onCancel: () => void;
+}> = ({ onImport, onCancel }) => {
+  const [csvText, setCsvText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const fileRef = React.useRef<HTMLInputElement>(null);
+
+  const downloadTemplate = () => {
+    const blob = new Blob([USER_CSV_TEMPLATE], { type: 'text/csv' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'user_import_template.csv';
+    link.click();
+  };
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => setCsvText(ev.target?.result as string ?? '');
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const parseCsv = (text: string): { rows: UserRow[]; error: string | null } => {
+    const lines = text.trim().split('\n').filter(l => l.trim());
+    if (lines.length < 2) return { rows: [], error: 'Need at least one data row.' };
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const required = ['username', 'password'];
+    for (const r of required) {
+      if (!headers.includes(r)) return { rows: [], error: `Missing required column: ${r}` };
+    }
+    const rows: UserRow[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const vals = lines[i].split(',').map(v => v.trim());
+      const obj: Record<string, string> = {};
+      headers.forEach((h, idx) => { obj[h] = vals[idx] ?? ''; });
+      const role = (obj['role'] || 'PARTICIPANT').toUpperCase();
+      rows.push({
+        username: obj['username'] ?? '',
+        email: obj['email'] ?? '',
+        password: obj['password'] ?? '',
+        first_name: obj['first_name'] ?? '',
+        last_name: obj['last_name'] ?? '',
+        role: role === 'ADMIN' ? 'ADMIN' : 'PARTICIPANT',
+      });
+    }
+    return { rows, error: null };
+  };
+
+  const handleImport = async () => {
+    const { rows, error } = parseCsv(csvText);
+    if (error) { setParseError(error); return; }
+    setParseError(null);
+    setLoading(true);
+    try {
+      await onImport(rows);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const { rows: preview } = parseCsv(csvText);
+
+  return (
+    <div className="space-y-5">
+      {/* Template download */}
+      <div className="flex items-center justify-between bg-blue-50 border border-blue-100 p-4 rounded-2xl">
+        <div>
+          <p className="text-sm font-bold text-blue-900">CSV Template</p>
+          <p className="text-xs text-blue-600 mt-0.5">Columns: first_name, last_name, username, email, password, role</p>
+          <p className="text-[11px] text-blue-500 mt-0.5">Role must be <strong>PARTICIPANT</strong> or <strong>ADMIN</strong></p>
+        </div>
+        <button onClick={downloadTemplate} className="flex items-center gap-2 px-4 py-2 bg-white text-blue-600 border border-blue-200 rounded-xl text-xs font-bold hover:bg-blue-50 transition">
+          <Download className="w-4 h-4" /> Download
+        </button>
+      </div>
+
+      {/* File upload + paste */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+            Paste CSV or Upload File
+            {preview.length > 0 && (
+              <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px]">{preview.length} users</span>
+            )}
+          </label>
+          <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 hover:text-blue-600 bg-slate-100 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition">
+            <Upload className="w-3.5 h-3.5" /> Upload CSV
+          </button>
+          <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleFile} />
+        </div>
+        <textarea
+          value={csvText}
+          onChange={e => { setCsvText(e.target.value); setParseError(null); }}
+          placeholder="first_name,last_name,username,email,password,role&#10;Jane,Doe,jdoe,jane@company.com,Pass@123,PARTICIPANT"
+          className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none text-xs font-mono h-40 resize-none leading-relaxed"
+        />
+        {parseError && <p className="text-xs text-red-500 font-bold mt-1">{parseError}</p>}
+      </div>
+
+      <div className="flex gap-4 pt-2">
+        <button onClick={onCancel} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold text-sm">Cancel</button>
+        <button
+          onClick={handleImport}
+          disabled={preview.length === 0 || loading}
+          className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-700 transition"
+        >
+          {loading ? 'Importing...' : `Import ${preview.length > 0 ? `(${preview.length})` : 'Users'}`}
         </button>
       </div>
     </div>

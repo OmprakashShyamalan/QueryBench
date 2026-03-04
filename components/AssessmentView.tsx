@@ -22,6 +22,7 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
   const [assessment, setAssessment] = useState<ApiAssessmentFull | null>(null);
   const [attempt, setAttempt] = useState<ApiAttempt | null>(null);
   const [schema, setSchema] = useState<SchemaMetadata | null>(null);
+  const [schemaCache, setSchemaCache] = useState<Record<string, SchemaMetadata>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,8 +41,8 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [schemaSearch, setSchemaSearch] = useState('');
   
-  // Timer
-  const [timeLeft, setTimeLeft] = useState(3600);
+  // Timer — initialised to 0; overwritten with server value once the attempt loads
+  const [timeLeft, setTimeLeft] = useState(0);
   const timerRef = useRef<number | null>(null);
 
   // Resizing State (Percentages)
@@ -50,26 +51,23 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
   const containerRef = useRef<HTMLDivElement>(null);
   const rightPaneRef = useRef<HTMLDivElement>(null);
 
+
   useEffect(() => {
     const loadData = async () => {
       try {
         setIsLoading(true);
         setError(null);
-        
+
         const attempt = await assignmentsApi.startAttempt(Number(assignmentId));
         setAttempt(attempt);
+
+        // Seed the countdown from the server-authoritative remaining time.
+        // This keeps the timer accurate after disconnects/reloads.
+        setTimeLeft(attempt.time_remaining_seconds);
 
         const assignment = await assignmentsApi.get(Number(assignmentId));
         const assessmentData = await assessmentsApi.full(assignment.assessment);
         setAssessment(assessmentData);
-        setTimeLeft(assessmentData.duration_minutes * 60);
-
-        if (assessmentData.db_config) {
-          const schemaData = await schemaApi.get(assessmentData.db_config);
-          setSchema(schemaData);
-        } else {
-          setSchema({ tables: [] });
-        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load assessment data.');
       } finally {
@@ -79,13 +77,33 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
     loadData();
   }, [assignmentId]);
 
+  // Fetch schema for current question (minimized)
+  useEffect(() => {
+    const fetchSchema = async () => {
+      if (!assessment || !assessment.db_config || !assessment.questions_data?.length) return;
+      const currentQuestion = assessment.questions_data[currentQuestionIndex];
+      if (!currentQuestion) return;
+      if (schemaCache[currentQuestion.id]) {
+        setSchema(schemaCache[currentQuestion.id]);
+        return;
+      }
+      try {
+        const schemaData = await schemaApi.get(assessment.db_config, currentQuestion.id);
+        setSchemaCache(prev => ({ ...prev, [currentQuestion.id]: schemaData }));
+        setSchema(schemaData);
+      } catch {
+        setSchema({ tables: [] });
+      }
+    };
+    fetchSchema();
+  }, [assessment, currentQuestionIndex]);
+
   useEffect(() => {
     if (!isLoading && !isFinished) {
       timerRef.current = window.setInterval(() => {
         setTimeLeft(prev => {
           if (prev <= 1) {
             if (timerRef.current) clearInterval(timerRef.current);
-            // Auto-submit
             finalizeSubmission();
             return 0;
           }
@@ -97,6 +115,34 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [isLoading, isFinished]);
+
+  // Auto-finalize immediately if the server says time has already run out
+  // (handles the case where a participant returns after the deadline).
+  useEffect(() => {
+    if (!isLoading && !isFinished && timeLeft === 0 && attempt) {
+      finalizeSubmission();
+    }
+  }, [isLoading]);
+
+  // Close the attempt and destroy the session when the participant closes the tab.
+  // navigator.sendBeacon is the only reliable fire-and-forget API on page unload.
+  // We send the CSRF token as a form field because sendBeacon cannot set headers.
+  useEffect(() => {
+    if (!attempt) return;
+
+    const handlePageHide = (event: PageTransitionEvent) => {
+      // event.persisted === true means the page went into the back-forward cache
+      // (not a real close), so we skip it.
+      if (event.persisted) return;
+
+      const csrfToken = document.cookie.match(/csrftoken=([^;]+)/)?.[1] ?? '';
+      const body = new URLSearchParams({ csrfmiddlewaretoken: csrfToken });
+      navigator.sendBeacon(`/api/v1/attempts/${attempt.id}/close_session/`, body);
+    };
+
+    window.addEventListener('pagehide', handlePageHide);
+    return () => window.removeEventListener('pagehide', handlePageHide);
+  }, [attempt]);
 
   const handleExecute = async () => {
     if (!assessment || !attempt) return;
@@ -363,7 +409,7 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
   if (!assessment) return null; // Should not happen if not loading and no error
 
   const currentQuestion: ApiQuestion = assessment.questions_data[currentQuestionIndex];
-  const currentQuery = queries[currentQuestion.id] || `-- Write your query for: ${currentQuestion.title}\n`;
+  const currentQuery = queries[currentQuestion.id] || '';
   const filteredTables = schema?.tables.filter(t => 
     t.name.toLowerCase().includes(schemaSearch.toLowerCase())
   ) || [];
@@ -473,8 +519,9 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
           </div>
 
           <div className="flex-1 relative overflow-hidden">
-            <CodeMirror 
-              value={currentQuery} 
+            <CodeMirror
+              key={currentQuestion.id}
+              value={currentQuery}
               height="100%" 
               theme="dark" 
               extensions={[

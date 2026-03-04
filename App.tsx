@@ -16,6 +16,18 @@ const App: React.FC = () => {
   // true while we're checking the session on first load
   const [sessionChecking, setSessionChecking] = useState(true);
 
+  // Log out server-side when the tab/window is closed
+  useEffect(() => {
+    const handlePageHide = (event: PageTransitionEvent) => {
+      if (event.persisted) return; // BFCache navigation — not a real close
+      const csrfToken = document.cookie.match(/csrftoken=([^;]+)/)?.[1] ?? '';
+      const body = new URLSearchParams({ csrfmiddlewaretoken: csrfToken });
+      navigator.sendBeacon('/api/v1/auth/logout/', body);
+    };
+    window.addEventListener('pagehide', handlePageHide);
+    return () => window.removeEventListener('pagehide', handlePageHide);
+  }, []);
+
   // Restore session on page load
   useEffect(() => {
     authApi.me()

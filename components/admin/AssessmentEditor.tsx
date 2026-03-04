@@ -15,10 +15,19 @@ export const AssessmentEditor: React.FC<Props> = ({ item, targets, questions, on
   const [editingItem, setEditingItem] = useState<Partial<Assessment>>(item);
   const [filterText, setFilterText] = useState('');
 
-  const filteredQuestions = questions.filter(q => 
-    q.title.toLowerCase().includes(filterText.toLowerCase()) || 
-    q.tags.some(t => t.toLowerCase().includes(filterText.toLowerCase()))
-  );
+  const selectedDb = (editingItem.db_config as any)?.database_name as string | undefined;
+
+  const filteredQuestions = questions
+    .filter(q => {
+      if (!selectedDb) return true;
+      const tag: string = (q as any).expected_schema_ref || (q as any).environment_tag || '';
+      return tag === selectedDb;
+    })
+    .filter(q =>
+      filterText === '' ||
+      q.title.toLowerCase().includes(filterText.toLowerCase()) ||
+      q.tags.some(t => t.toLowerCase().includes(filterText.toLowerCase()))
+    );
 
   return (
     <div className="space-y-5">
@@ -27,6 +36,7 @@ export const AssessmentEditor: React.FC<Props> = ({ item, targets, questions, on
           <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Assessment Name</label>
           <input 
             type="text" 
+            name="name"
             value={editingItem.name || ''} 
             onChange={e => setEditingItem({...editingItem, name: e.target.value})}
             className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-bold text-slate-900" 
@@ -39,6 +49,7 @@ export const AssessmentEditor: React.FC<Props> = ({ item, targets, questions, on
           </label>
           <input 
             type="number" 
+            name="duration_minutes"
             value={editingItem.duration_minutes || 60} 
             onChange={e => setEditingItem({...editingItem, duration_minutes: parseInt(e.target.value)})}
             className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" 
@@ -49,6 +60,7 @@ export const AssessmentEditor: React.FC<Props> = ({ item, targets, questions, on
             <Database className="w-3.5 h-3.5" /> Database Target
           </label>
           <select 
+            name="db_config"
             value={editingItem.db_config?.database_name || ''} 
             onChange={e => {
               const target = targets.find(t => t.database_name === e.target.value);
@@ -66,7 +78,8 @@ export const AssessmentEditor: React.FC<Props> = ({ item, targets, questions, on
         <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
           <AlignLeft className="w-3.5 h-3.5" /> Description
         </label>
-        <textarea 
+        <textarea
+          name="description"
           value={editingItem.description || ''} 
           onChange={e => setEditingItem({...editingItem, description: e.target.value})}
           className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl h-24 outline-none resize-none"
@@ -92,14 +105,18 @@ export const AssessmentEditor: React.FC<Props> = ({ item, targets, questions, on
         </div>
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 h-48 overflow-y-auto space-y-2">
            {filteredQuestions.length === 0 ? (
-             <p className="text-xs text-slate-400 text-center py-4 italic">No matching questions found.</p>
+             <p className="text-xs text-slate-400 text-center py-4 italic">
+               {selectedDb
+                 ? `No questions tagged for "${selectedDb}". Create questions with this database environment first.`
+                 : 'Select a Database Target above to see matching questions.'}
+             </p>
            ) : filteredQuestions.map(q => {
              const isSelected = editingItem.questions?.some(sq => sq.id === q.id);
              return (
-               <div key={q.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-white hover:shadow-sm transition-all border border-transparent hover:border-slate-100">
+               <div key={q.id} onClick={() => { const current = editingItem.questions || []; if (isSelected) { setEditingItem({...editingItem, questions: current.filter(x => x.id !== q.id)}); } else { setEditingItem({...editingItem, questions: [...current, q]}); } }} className="flex items-center justify-between p-2 rounded-lg hover:bg-white hover:shadow-sm transition-all border border-transparent hover:border-slate-100 cursor-pointer">
                  <div className="flex items-center gap-3">
-                   <input 
-                    type="checkbox" 
+                   <input
+                    type="checkbox"
                     checked={isSelected}
                     onChange={() => {
                       const current = editingItem.questions || [];

@@ -93,11 +93,19 @@ ORDER BY t.name, c.column_id;
 
 
 def _parse_rows(rows) -> Dict[str, Any]:
-    tables_map = {}
+    tables_map: Dict[str, Any] = {}
+    seen_cols: Dict[str, set] = {}  # table_name → set of column names already added
     for row in rows:
         t_name, c_name, dtype, nullable, is_pk, ref_table, ref_col = row
         if t_name not in tables_map:
             tables_map[t_name] = {"name": t_name, "columns": []}
+            seen_cols[t_name] = set()
+        # Skip duplicate column entries.  Duplicates occur when a column participates
+        # in multiple FK constraints, causing the LEFT JOIN in _META_QUERY to emit
+        # more than one row for the same (table, column) pair.
+        if c_name in seen_cols[t_name]:
+            continue
+        seen_cols[t_name].add(c_name)
         col_meta = {
             "name": c_name,
             "type": dtype.upper(),
@@ -115,6 +123,9 @@ def inspect_schema(db_config_id: int = None, conn_str: Optional[str] = None, sol
     """
     Extracts schema metadata (Tables, Columns, PKs, FKs) from the target database.
 
+    Returns the complete schema for all user tables — no filtering by solution query.
+    Participants need the full data model to understand context and write JOINs freely.
+
     If conn_str is provided, connects directly using that string.
     Otherwise falls back to the primary router connection.
     """
@@ -127,31 +138,7 @@ def inspect_schema(db_config_id: int = None, conn_str: Optional[str] = None, sol
         cursor = conn.cursor()
         cursor.execute(_META_QUERY)
         rows = cursor.fetchall()
-        full_schema = _parse_rows(rows)
-
-        if solution_query:
-            from .schema_loader import extract_tables_from_sqlserver
-            referenced = extract_tables_from_sqlserver(solution_query)
-            if referenced:
-                # Filter tables
-                filtered_tables = []
-                referenced_set = set(t.lower() for t in referenced)
-                for t in full_schema['tables']:
-                    if t['name'].lower() in referenced_set:
-                        filtered_tables.append(t)
-                # Filter relationships: only keep FKs where both tables are present
-                present = set(t['name'].lower() for t in filtered_tables)
-                for t in filtered_tables:
-                    t['columns'] = [
-                        col if not (col.get('isForeignKey') and col.get('references'))
-                        or col['references']['table'].lower() in present
-                        else {k: v for k, v in col.items() if k != 'references'}
-                        for col in t['columns']
-                    ]
-                if filtered_tables:
-                    return {'tables': filtered_tables}
-        # Fallback: return full schema
-        return full_schema
+        return _parse_rows(rows)
     except Exception as e:
         return {"error": str(e), "tables": []}
     finally:

@@ -9,7 +9,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-enterprise-key-99887766')
 
-DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
+# Environment mode: "local" (default) or "prod".
+# Set QB_ENV=prod in the production environment to tighten security settings.
+ENV = os.environ.get("QB_ENV", "local").lower()
+DEBUG = (ENV == "local")
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 
@@ -22,10 +25,12 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'csp',
     'api',
 ]
 
 MIDDLEWARE = [
+    'csp.middleware.CSPMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -115,6 +120,14 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
         'rest_framework.authentication.BasicAuthentication',
     ],
+    # Anti-automation: 100 requests/min per authenticated user (ASVS V13).
+    # Raise or lower "user" rate to match expected load before going to prod.
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'user': '100/min',
+    },
 }
 
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all in development
@@ -122,8 +135,80 @@ CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000'
 CORS_ALLOW_CREDENTIALS = True
 
 CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000').split(',')
+if DEBUG:
+    CSRF_TRUSTED_ORIGINS += ['http://*:3000', 'http://*:3001']
 CSRF_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_SAMESITE = 'Lax'
 
 # Session expires when the browser is closed (no persistent cookies across sessions)
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
+# ── Cookie security ────────────────────────────────────────────────────────────
+# Secure flag is off in local mode (no HTTPS); enable for prod.
+SESSION_COOKIE_SECURE = (ENV == "prod")
+CSRF_COOKIE_SECURE = (ENV == "prod")
+# SameSite=Lax prevents most CSRF; tighten to "Strict" in prod if front + back share origin.
+# (SESSION_COOKIE_SAMESITE and CSRF_COOKIE_SAMESITE already set above to 'Lax')
+
+# ── Core security headers ──────────────────────────────────────────────────────
+SECURE_CONTENT_TYPE_NOSNIFF = True   # X-Content-Type-Options: nosniff
+X_FRAME_OPTIONS = "DENY"             # Clickjacking protection (also handled by XFrameOptionsMiddleware)
+
+# ── Content Security Policy ────────────────────────────────────────────────────
+# Default: self-only. No external CDNs allowed.
+# Add 'unsafe-inline' or hashes here only if the Vite build requires it.
+# In prod, consider restricting CONNECT_SRC to the API origin only.
+CSP_DEFAULT_SRC = ("'self'",)
+CSP_SCRIPT_SRC = ("'self'",)
+CSP_STYLE_SRC = ("'self'",)
+CSP_IMG_SRC = ("'self'", "data:")
+
+# ── Enterprise SSO / OIDC (placeholder — disabled by default) ─────────────────
+# To enable: set QB_USE_SSO=true and supply the OIDC_* env vars below.
+# Requires:  pip install mozilla-django-oidc
+USE_ENTERPRISE_SSO = (os.environ.get("QB_USE_SSO", "false").lower() == "true")
+
+if USE_ENTERPRISE_SSO:
+    INSTALLED_APPS += ["mozilla_django_oidc"]
+    AUTHENTICATION_BACKENDS = (
+        "django.contrib.auth.backends.ModelBackend",
+        "mozilla_django_oidc.auth.OIDCAuthenticationBackend",
+    )
+
+    LOGIN_URL = "/oidc/authenticate/"
+    LOGIN_REDIRECT_URL = "/"
+    LOGOUT_REDIRECT_URL = "/"
+
+    OIDC_RP_CLIENT_ID = os.environ.get("OIDC_RP_CLIENT_ID", "<placeholder>")
+    OIDC_RP_CLIENT_SECRET = os.environ.get("OIDC_RP_CLIENT_SECRET", "<placeholder>")
+    OIDC_RP_SIGN_ALGO = "RS256"
+    OIDC_RP_SCOPES = "openid profile email"
+
+    # Microsoft Entra ID (Azure AD) endpoints — fill in when tenant details are available.
+    OIDC_OP_AUTHORIZATION_ENDPOINT = os.environ.get("OIDC_OP_AUTHORIZATION_ENDPOINT", "<placeholder>")
+    OIDC_OP_TOKEN_ENDPOINT = os.environ.get("OIDC_OP_TOKEN_ENDPOINT", "<placeholder>")
+    OIDC_OP_USER_ENDPOINT = os.environ.get("OIDC_OP_USER_ENDPOINT", "<placeholder>")
+    OIDC_OP_JWKS_ENDPOINT = os.environ.get("OIDC_OP_JWKS_ENDPOINT", "<placeholder>")
+
+# ── Structured logging ─────────────────────────────────────────────────────────
+# JSON-like format to stdout; ready for SIEM ingestion when deployed.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "json": {
+            "format": "%(asctime)s %(levelname)s %(name)s %(message)s",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "json",
+        },
+    },
+    "loggers": {
+        "querybench": {"handlers": ["console"], "level": "INFO"},
+        "QueryBench":  {"handlers": ["console"], "level": "INFO"},
+        "django.security": {"handlers": ["console"], "level": "INFO"},
+    },
+}

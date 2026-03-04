@@ -45,6 +45,7 @@ export const LoginView: React.FC<Props> = ({ onCredentialLogin, isAuthenticating
             </label>
             <input
               type="text"
+              name="username"
               value={username}
               onChange={e => setUsername(e.target.value)}
               autoComplete="username"
@@ -62,6 +63,7 @@ export const LoginView: React.FC<Props> = ({ onCredentialLogin, isAuthenticating
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
+                name="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 autoComplete="current-password"

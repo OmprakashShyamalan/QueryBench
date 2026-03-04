@@ -70,13 +70,14 @@ def execute_query(
                 conn = db_router.get_connection()
             cursor = conn.cursor()
 
-            # Best-effort statement-level timeout via ODBC driver hint
+            # Enforce statement-level query timeout (pyodbc >= 4.0.26 only)
             try:
-                cursor.setinputsizes([(pyodbc.SQL_QUERY_TIMEOUT, QUERY_TIMEOUT_SECONDS, 0)])
+                cursor.timeout = QUERY_TIMEOUT_SECONDS
             except Exception:
                 pass
 
             rewritten_sql = sql_eval.apply_row_limit(query)
+            rewritten_sql = sql_eval.ensure_order_by(rewritten_sql)
             cursor.execute(rewritten_sql)
 
             cols = [column[0] for column in cursor.description]
@@ -105,14 +106,14 @@ def execute_query(
 
             if "timeout" in err_msg.lower():
                 display_msg = "Query execution timed out. Limit your query's complexity or check for missing joins."
-            elif "invalid object name" in err_msg.lower() or "does not exist" in err_msg.lower():
-                display_msg = "Table or column not found. Check the Explorer tab to see available tables and columns."
-            elif "syntax error" in err_msg.lower():
-                display_msg = "SQL Syntax Error. Please review your query syntax."
             else:
-                display_msg = f"Database Error: {err_msg[:100]}"
+                display_msg = f"Database Error: {err_msg[:300]}"
 
             return None, display_msg, (time.time() - start_time) * 1000
+        except Exception as e:
+            err_msg = str(e)
+            logger.error(f"User: {user_id} | Unexpected Error: {err_msg}", exc_info=True)
+            return None, f"Query execution error: {err_msg[:200]}", (time.time() - start_time) * 1000
         finally:
             if conn:
                 conn.close()

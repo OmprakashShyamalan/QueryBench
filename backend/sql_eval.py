@@ -19,6 +19,7 @@ This module ensures:
 import re
 import decimal
 import datetime
+import sqlparse
 from typing import Any, Dict, List, Tuple
 
 from .config import MAX_RESULT_ROWS, DECIMAL_PRECISION, CASE_INSENSITIVE_COLUMNS, STRIP_STRINGS
@@ -74,6 +75,17 @@ def validate_sql(sql: str) -> None:
     stripped = sql.strip()
     if not stripped:
         raise ValueError("Query cannot be empty.")
+
+    # 0. sqlparse: defence-in-depth multi-statement check.
+    #    Runs before regex checks so malformed input never reaches them.
+    try:
+        parsed_stmts = sqlparse.parse(stripped)
+        if len(parsed_stmts) != 1:
+            raise ValueError("Multiple SQL statements are not allowed.")
+    except ValueError:
+        raise
+    except Exception:
+        pass  # sqlparse failure is non-fatal; downstream checks cover the same cases
 
     upper = stripped.upper()
 
@@ -235,6 +247,22 @@ def apply_row_limit(sql: str, limit: int = MAX_RESULT_ROWS) -> str:
         return clean[:insert_pos] + f' TOP ({limit})' + clean[insert_pos:]
     # Unreachable for valid SELECT/WITH queries; fallback keeps ORDER BY legal.
     return f"{clean} OFFSET 0 ROWS FETCH NEXT {limit} ROWS ONLY"
+
+
+# ---------------------------------------------------------------------------
+# ensure_order_by
+# ---------------------------------------------------------------------------
+
+def ensure_order_by(sql: str) -> str:
+    """
+    Appends ORDER BY 1 if the query has no ORDER BY clause.
+
+    SQL Server requires ORDER BY when OFFSET/FETCH is used, and consistent
+    ordering avoids non-deterministic results across runs.
+    """
+    if not re.search(r'\bORDER\s+BY\b', sql, re.IGNORECASE):
+        return f"{sql} ORDER BY 1"
+    return sql
 
 
 # ---------------------------------------------------------------------------
