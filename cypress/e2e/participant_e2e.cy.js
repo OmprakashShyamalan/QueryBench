@@ -31,9 +31,11 @@ describe('Participant Flow E2E', () => {
   // Helper: focus the CodeMirror editor, clear any existing content, then type a query.
   // Clears first (select-all + delete) to avoid appending to leftover content from a
   // previous run or autocomplete insertion. Uses Escape to dismiss any open autocomplete.
+  // force:true is required after switching away from the Diagram tab (React Flow holds
+  // focus and the actionability check would otherwise fail).
   const typeQuery = (query) => {
     cy.get('.cm-content')
-      .click()
+      .click({ force: true })
       .type('{selectall}', { parseSpecialCharSequences: true })
       .type('{del}', { parseSpecialCharSequences: true })
       .type('{esc}', { parseSpecialCharSequences: true })
@@ -60,41 +62,43 @@ describe('Participant Flow E2E', () => {
 
   // ─── Schema Explorer ─────────────────────────────────────────────────────
 
-  it('3. Explorer tab shows all schema tables', () => {
-    // Q1 solution query uses Customers — full schema is loaded for this assessment DB
+  it('3. Explorer tab shows only Q1-relevant table', () => {
+    // The schema API is called with question_id, so the backend filters to only
+    // the tables referenced in Q1's solution query: Customers.
     cy.contains('button', 'Explorer').click();
 
-    // Tables directly referenced in solution queries
+    // Customers must be visible — it is the only table in Q1's solution query
     cy.contains('Customers', { timeout: 8000 }).should('be.visible');
-
-    // Tables not referenced in Q1 but present in the full schema — verifies the
-    // explorer shows the complete data model, not just the question-scoped subset
-    cy.contains('Products', { timeout: 8000 }).should('be.visible');
-    cy.contains('Suppliers', { timeout: 8000 }).should('be.visible');
 
     // Column details inside the Customers card must be visible
     cy.contains('CustomerID').should('be.visible');
+
+    // Tables outside Q1's solution must not appear in the explorer
+    cy.contains('Products').should('not.exist');
+    cy.contains('Suppliers').should('not.exist');
   });
 
   // ─── ER Diagram ──────────────────────────────────────────────────────────
 
-  it('4. Diagram tab renders ER diagram with all table nodes and FK edges', () => {
+  it('4. Diagram tab renders ER diagram for Q1-relevant table', () => {
     cy.contains('button', 'Diagram').click();
 
     // ReactFlow root element must mount
     cy.get('.react-flow', { timeout: 8000 }).should('exist');
 
-    // Full-schema nodes: tables not scoped to the solution query must also appear
+    // Q1's solution references only Customers — that is the only node in the diagram
     cy.get('.react-flow__nodes').contains('Customers').should('exist');
-    cy.get('.react-flow__nodes').contains('Orders').should('exist');
-    cy.get('.react-flow__nodes').contains('Products').should('exist');
-    cy.get('.react-flow__nodes').contains('Suppliers').should('exist');
 
-    // FK edges must be drawn (complete schema has multiple FKs)
-    cy.get('.react-flow__edges .react-flow__edge').should('have.length.greaterThan', 2);
+    // Tables outside Q1's solution must not appear as diagram nodes
+    cy.get('.react-flow__nodes').contains('Orders').should('not.exist');
+    cy.get('.react-flow__nodes').contains('Products').should('not.exist');
+    cy.get('.react-flow__nodes').contains('Suppliers').should('not.exist');
 
-    // Return to Prompt tab so subsequent tests start from a clean state
+    // Return to Prompt tab. Wait briefly for React Flow to fully unmount — without
+    // this pause the CodeMirror editor in the next test can miss the click due to
+    // residual focus held by the React Flow canvas.
     cy.contains('button', 'Prompt').click();
+    cy.wait(500);
   });
 
   // ─── Q1: Wrong Syntax ────────────────────────────────────────────────────

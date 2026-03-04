@@ -137,8 +137,8 @@ Before running, ensure:
 |---|---|---|
 | 1 | Participant Logs In | Authenticates as participant, lands on Participant Dashboard |
 | 2 | Participant Opens Assigned Assessment | Opens the assessment from the inbox |
-| 3 | Explorer tab shows all schema tables | Verifies full schema (Customers, Orders, Products, Suppliers, …) is shown in Explorer |
-| 4 | Diagram tab renders ER diagram with all table nodes and FK edges | Asserts all table nodes and >2 FK edges are visible in React Flow |
+| 3 | Explorer tab shows only Q1-relevant table | Explorer shows only `Customers` (Q1's solution table); asserts `Products`/`Suppliers` are absent |
+| 4 | Diagram tab renders ER diagram for Q1-relevant table | React Flow renders with only the `Customers` node; asserts `Orders`/`Products`/`Suppliers` nodes are absent |
 | 5 | Q1 — Wrong Syntax Answer | Submits `SELCT` typo, asserts syntax error feedback |
 | 6 | Q2 — Correct Syntax, Wrong Projection | Submits a query missing a column, asserts incorrect answer feedback |
 | 7 | Q3 — Correct Answer | Submits a correct query, asserts "Query Correct!" |
