@@ -35,8 +35,13 @@ def normalize_value(val: Any) -> Any:
         return None
     if isinstance(val, decimal.Decimal):
         return round(float(val), DECIMAL_PRECISION)
-    if isinstance(val, (datetime.date, datetime.datetime)):
+    # datetime.datetime must be checked before datetime.date because datetime is a
+    # subclass of date — reversing the order causes date's .replace() to be called
+    # with microsecond=, which raises TypeError.
+    if isinstance(val, datetime.datetime):
         return val.replace(microsecond=0).isoformat()
+    if isinstance(val, datetime.date):
+        return val.isoformat()
     if isinstance(val, str) and STRIP_STRINGS:
         return val.strip()
     return val
