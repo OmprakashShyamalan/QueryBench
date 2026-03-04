@@ -69,11 +69,18 @@ QueryBench/
 │
 ├── cypress/                     # End-to-end tests
 │   ├── e2e/
-│   │   ├── admin_e2e.cy.js      # Admin setup flow (7 tests)
-│   │   └── participant_e2e.cy.js # Participant assessment flow (11 tests)
+│   │   ├── admin_e2e.cy.js               # Admin setup — W3Schools DB (7 tests)
+│   │   ├── admin_training_e2e.cy.js      # Admin setup — internal training DB (7 tests) *
+│   │   ├── participant_e2e.cy.js         # Participant flow — W3Schools DB (11 tests)
+│   │   └── participant_training_e2e.cy.js # Participant flow — internal training DB (11 tests) *
+│   ├── fixtures/
+│   │   ├── e2e_session.json              # Written by admin_e2e; read by participant_e2e
+│   │   └── e2e_session_training.json     # Written by admin_training_e2e; read by participant_training_e2e
 │   └── support/
 │       ├── e2e.ts
 │       └── commands.ts
+│
+│   * Training suites require Sapiens internal network. See TESTING.md for details.
 │
 ├── App.tsx                      # React root — routing and auth state
 ├── index.tsx                    # Vite entry point
@@ -155,18 +162,22 @@ npm run dev        # Starts on http://localhost:3000
 
 ## E2E Testing (Cypress)
 
-Tests are split into two suites that run in alphabetical order:
+Four specs cover two database environments, run alphabetically (admin before participant in each pair):
 
-| Suite | File | Tests | Description |
+| Suite | File | Tests | DB environment |
 |---|---|---|---|
-| Admin | `admin_e2e.cy.js` | 7 | Admin login → create user, infra, questions, assessment, assignment, logout |
-| Participant | `participant_e2e.cy.js` | 11 | Login → schema explorer, ER diagram, wrong/correct answers, submit → admin verifies |
+| Admin — W3Schools | `admin_e2e.cy.js` | 7 | Local SQL Server |
+| Admin — Training | `admin_training_e2e.cy.js` | 7 | Sapiens internal network only |
+| Participant — W3Schools | `participant_e2e.cy.js` | 11 | Local SQL Server |
+| Participant — Training | `participant_training_e2e.cy.js` | 11 | Sapiens internal network only |
+
+Each admin spec writes a fixture file consumed by the matching participant spec. The training suites use a separate internal SQL Server with `SQL_STORE` and `SQL_MOVIE` schemas; connection details are embedded in the spec files and must **not be shared outside the organisation**. These suites will fail if run outside the Sapiens network.
 
 ```powershell
-# Run all tests (admin first, participant second)
+# Run all tests (all 4 specs in order)
 .\run_cypress_clean.ps1
 
-# Run a single suite
+# Run W3Schools suites only
 .\run_cypress_clean.ps1 admin
 .\run_cypress_clean.ps1 participant
 

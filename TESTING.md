@@ -4,12 +4,14 @@
 
 ## Overview
 
-| Suite | File | Tests | Runner |
-|---|---|---|---|
-| Backend unit | `backend/tests_sql_eval.py` | 57 | `unittest` |
-| Security guardrails | `api/tests/test_security.py` | 17 | `manage.py test` |
-| E2E — Admin flow | `cypress/e2e/admin_e2e.cy.js` | 7 | Cypress |
-| E2E — Participant flow | `cypress/e2e/participant_e2e.cy.js` | 11 | Cypress |
+| Suite | File | Tests | Runner | Infra required |
+|---|---|---|---|---|
+| Backend unit | `backend/tests_sql_eval.py` | 57 | `unittest` | None (pure Python) |
+| Security guardrails | `api/tests/test_security.py` | 17 | `manage.py test` | None |
+| E2E — Admin flow | `cypress/e2e/admin_e2e.cy.js` | 7 | Cypress | Local SQL Server (`W3Schools_DB`) |
+| E2E — Participant flow | `cypress/e2e/participant_e2e.cy.js` | 11 | Cypress | Local SQL Server (`W3Schools_DB`) |
+| E2E — Admin Training | `cypress/e2e/admin_training_e2e.cy.js` | 7 | Cypress | Sapiens internal network only |
+| E2E — Participant Training | `cypress/e2e/participant_training_e2e.cy.js` | 11 | Cypress | Sapiens internal network only |
 
 ---
 
@@ -93,14 +95,21 @@ Expected output: `Ran 17 tests in ~0.06s — OK`
 
 ## 3. Cypress E2E Tests
 
-Both suites share state (`testIsolation: false`) and must run in order: **admin first, participant second**.
+Four specs cover two distinct database environments. All specs share state (`testIsolation: false`) within each spec file. Cypress runs them alphabetically, so the natural order is correct:
 
-The recommended way to run both suites is via the helper script:
+```
+1. admin_e2e.cy.js            → writes  cypress/fixtures/e2e_session.json
+2. admin_training_e2e.cy.js   → writes  cypress/fixtures/e2e_session_training.json
+3. participant_e2e.cy.js      → reads   cypress/fixtures/e2e_session.json
+4. participant_training_e2e.cy.js → reads cypress/fixtures/e2e_session_training.json
+```
+
+The recommended way to run suites is via the helper script:
 
 ```powershell
-.\run_cypress_clean.ps1          # run both suites in order
-.\run_cypress_clean.ps1 admin    # admin suite only
-.\run_cypress_clean.ps1 participant  # participant suite only
+.\run_cypress_clean.ps1          # run all specs in order
+.\run_cypress_clean.ps1 admin    # admin suite only (W3Schools)
+.\run_cypress_clean.ps1 participant  # participant suite only (W3Schools)
 ```
 
 Or interactively:
@@ -118,6 +127,10 @@ Before running, ensure:
 - Django is running: `python manage.py runserver 8080`
 - Vite is running: `npm run dev`
 - The management DB is clean (the scripts create all data from scratch)
+
+### Network requirement — Training suites
+
+The `admin_training_e2e.cy.js` and `participant_training_e2e.cy.js` suites connect to an **internal SQL Server instance** that is only reachable from within the Sapiens corporate network (or VPN). They will time out if run from outside that network. The W3Schools suites (`admin_e2e.cy.js` / `participant_e2e.cy.js`) have no such restriction and can run locally at any time.
 
 ### Suite 1 — Admin flow (`admin_e2e.cy.js`, 7 tests)
 
@@ -146,6 +159,65 @@ Before running, ensure:
 | 9 | Q5 — Correct Answer | Runs the correct query, asserts "Query Correct!" |
 | 10 | Participant Submits Assessment | Clicks Submit, confirms, asserts "Assessment Submitted" |
 | 11 | Admin Verifies Results | Logs back in as admin, opens Results tab, asserts attempt is recorded with a score |
+
+---
+
+### Suite 3 — Admin Training flow (`admin_training_e2e.cy.js`, 7 tests)
+
+> **Requires Sapiens internal network.** Connects to an internal SQL Server with two schemas: `SQL_STORE` (store/orders domain) and `SQL_MOVIE` (Marvel movie dataset). Connection details are stored in the test file; do not share them publicly. This suite writes state to `cypress/fixtures/e2e_session_training.json`.
+
+| # | Test | What it does |
+|---|---|---|
+| 1 | Admin Logs In | Authenticates as admin |
+| 2 | Admin Creates Participant User | Creates a participant account for the training session |
+| 3 | Admin Creates Infrastructure (SQL_TRAINING) | Adds a `DatabaseConfig` using **SQL Server auth** (not Windows auth); verifies Test Connection succeeds |
+| 4 | Admin Creates Questions (sql_store + sql_movie) | Creates 10 questions in a loop — 5 from `SQL_STORE` schema and 5 from `SQL_MOVIE` schema. Validates each query against the live DB; skips on failure. Tracks created question titles. |
+| 5 | Admin Creates Assessment | Builds a 5-question assessment (3 from `sql_store`, 2 from `sql_movie`) using only the questions that passed validation. Updates `e2e_session_training.json` with the final question set. |
+| 6 | Admin Assigns Assessment to Participant | Assigns the assessment to the training participant with a due date |
+| 7 | Admin Logs Out | Clicks Sign Out, asserts login page is shown |
+
+**Questions created (10 total):**
+
+| Schema | Title | Difficulty |
+|---|---|---|
+| `SQL_STORE` | Customer Countries | EASY |
+| `SQL_STORE` | Shipper Directory | EASY |
+| `SQL_STORE` | Products per Category | MEDIUM |
+| `SQL_STORE` | Orders in 1996 | MEDIUM |
+| `SQL_STORE` | Top 5 Customers by Order Volume | HARD |
+| `SQL_MOVIE` | Movies by MPAA Rating | EASY |
+| `SQL_MOVIE` | Distributor List | EASY |
+| `SQL_MOVIE` | Top 5 Movies by Worldwide Box Office | MEDIUM |
+| `SQL_MOVIE` | MCU Phase 1 Movies with Character Family | MEDIUM |
+| `SQL_MOVIE` | Average Box Office by Distributor | HARD |
+
+**Assessment includes** (5 questions, in participant test order):
+
+| Position | Title | Schema | Participant scenario |
+|---|---|---|---|
+| AQ1 | Customer Countries | `SQL_STORE` | Wrong-syntax test (`SELCT` typo) |
+| AQ2 | Shipper Directory | `SQL_STORE` | Wrong-projection test (omit `Phone`) |
+| AQ3 | Products per Category | `SQL_STORE` | Correct answer |
+| AQ4 | Movies by MPAA Rating | `SQL_MOVIE` | Correct answer |
+| AQ5 | Top 5 Movies by Worldwide Box Office | `SQL_MOVIE` | Correct answer |
+
+### Suite 4 — Participant Training flow (`participant_training_e2e.cy.js`, 11 tests)
+
+> **Requires Sapiens internal network** (same constraint as Suite 3). Reads from `cypress/fixtures/e2e_session_training.json`.
+
+| # | Test | What it does |
+|---|---|---|
+| 1 | Participant Logs In | Authenticates as training participant |
+| 2 | Participant Opens Assigned Assessment | Opens the training assessment from the inbox |
+| 3 | Explorer tab shows only Q1-relevant table | Explorer shows only `customers` (from `SQL_STORE`); asserts `Movie`/`shippers`/`orders` are absent |
+| 4 | Diagram tab renders ER diagram for Q1-relevant table | React Flow renders with only the `customers` node; asserts other tables are absent |
+| 5 | Q1 — Wrong Syntax Answer | Submits `SELCT` typo against `SQL_STORE.customers`, asserts "Query Execution Failed" |
+| 6 | Q2 — Correct Syntax, Wrong Projection | Submits shipper query omitting `Phone`, asserts "Result Mismatch" |
+| 7 | Q3 — Correct Answer | Products per category — asserts "Query Correct!" |
+| 8 | Q4 — Correct Answer | Movies by MPAA rating — asserts "Query Correct!" |
+| 9 | Q5 — Correct Answer | Top 5 movies by WW box office — asserts "Query Correct!" |
+| 10 | Participant Submits Assessment | Clicks Finish → Confirm, asserts "Assessment Submitted" |
+| 11 | Admin Verifies Results | Logs back in as admin, opens Results tab, asserts training attempt is recorded |
 
 ---
 
@@ -182,7 +254,16 @@ Add a method to the appropriate class in `api/tests/test_security.py`. New unsaf
 
 ### E2E test
 
-Add a new `it()` block inside the relevant `describe()` in `admin_e2e.cy.js` or `participant_e2e.cy.js`. The suites are stateful — new tests must account for the state left by previous tests.
+Add a new `it()` block inside the relevant `describe()`. There are now four specs:
+
+| Spec | Environment |
+|---|---|
+| `admin_e2e.cy.js` | Local W3Schools DB |
+| `participant_e2e.cy.js` | Local W3Schools DB |
+| `admin_training_e2e.cy.js` | Sapiens internal network only |
+| `participant_training_e2e.cy.js` | Sapiens internal network only |
+
+The suites are stateful — new tests must account for the state left by previous tests. For the training suites, ensure the machine is connected to the Sapiens network before running.
 
 ---
 
@@ -193,9 +274,10 @@ Add a new `it()` block inside the relevant `describe()` in `admin_e2e.cy.js` or 
 | `ModuleNotFoundError: backend` | Run from repo root with venv active |
 | `ModuleNotFoundError: No module named 'csp'` | Run `pip install "django-csp>=3.8,<4.0"` — required for the security tests and the running server |
 | Cypress times out on `cm-content` | Backend or frontend server not running; check ports 8080 / 3000 |
-| Cypress test 4 hangs during question creation | Expected if DB is unreachable — question validation will time out. Check the W3Schools DB connection. |
+| Cypress test 4 hangs during question creation | Expected if DB is unreachable — question validation will time out. Check the DB connection and network. |
 | `Validation Failed` flashes then corrects itself | Expected — the UI shows a spinner during the DB round-trip; the test waits 2s after clicking "Validate Logic" |
-| Cypress tests 5 or 6 show as `pending` (skipped) | All questions in test 4 failed validation — check that the W3Schools DB is online and the SQL queries are correct |
+| Cypress tests 5 or 6 show as `pending` (skipped) | All questions in test 4 failed validation — check that the target DB is online and reachable. |
+| Training suites fail on infra connection test | Machine is not on the Sapiens corporate network or VPN. The internal SQL Server is not reachable externally. |
 | `csp.E001` — settings format error | `django-csp` ≥ 4.0 uses `CONTENT_SECURITY_POLICY = {"DIRECTIVES": {...}}`. The project targets 3.x; do not upgrade without updating `settings.py`. |
 
 ---
@@ -206,7 +288,8 @@ Add a new `it()` block inside the relevant `describe()` in `admin_e2e.cy.js` or 
 |---|---|---|---|
 | `backend/tests_sql_eval.py` | 2026-03-04 | **57/57 PASS** | `Ran 57 tests in 0.060s — OK` |
 | `api/tests/test_security.py` | 2026-03-04 | **17/17 PASS** | `Ran 17 tests in 0.058s — OK` |
-| Cypress E2E | — | Not run in this session | Requires live DB and servers |
+| Cypress E2E — W3Schools | — | Not run in this session | Requires local SQL Server and running servers |
+| Cypress E2E — Training | — | Not run in this session | Requires Sapiens internal network + running servers |
 
 ---
 
