@@ -160,7 +160,7 @@ Tests are split into two suites that run in alphabetical order:
 | Suite | File | Tests | Description |
 |---|---|---|---|
 | Admin | `admin_e2e.cy.js` | 6 | Admin login → create user, infra, questions, assessment, assignment |
-| Participant | `participant_e2e.cy.js` | 9 | Login → wrong syntax, wrong logic, correct answers, submit → admin verifies |
+| Participant | `participant_e2e.cy.js` | 11 | Login → schema explorer, ER diagram, wrong/correct answers, submit → admin verifies |
 
 ```powershell
 # Run all tests (admin first, participant second)
