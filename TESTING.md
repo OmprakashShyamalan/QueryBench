@@ -8,7 +8,7 @@
 |---|---|---|---|
 | Backend unit | `backend/tests_sql_eval.py` | 57 | `unittest` |
 | Security guardrails | `api/tests/test_security.py` | 17 | `manage.py test` |
-| E2E — Admin flow | `cypress/e2e/admin_e2e.cy.js` | 6 | Cypress |
+| E2E — Admin flow | `cypress/e2e/admin_e2e.cy.js` | 7 | Cypress |
 | E2E — Participant flow | `cypress/e2e/participant_e2e.cy.js` | 11 | Cypress |
 
 ---
@@ -119,7 +119,7 @@ Before running, ensure:
 - Vite is running: `npm run dev`
 - The management DB is clean (the scripts create all data from scratch)
 
-### Suite 1 — Admin flow (`admin_e2e.cy.js`, 6 tests)
+### Suite 1 — Admin flow (`admin_e2e.cy.js`, 7 tests)
 
 | # | Test | What it does |
 |---|---|---|
@@ -129,6 +129,7 @@ Before running, ensure:
 | 4 | Admin Creates Questions | Creates questions in a loop: validates SQL, saves on pass, cancels on fail. Tracks created questions; fails fast if none succeed. Updates `e2e_session.json` with only the questions that were actually saved. |
 | 5 | Admin Creates Assessment | `this.skip()` if no questions were created. Adds only the saved questions to the assessment (prevents hang on missing titles). Sets `assessmentCreated = true` on success. |
 | 6 | Admin Assigns Assessment to Participant | `this.skip()` if assessment was not created. Assigns the assessment to the participant with a due date |
+| 7 | Admin Logs Out | Clicks the Sign Out button, asserts the login page is shown |
 
 ### Suite 2 — Participant flow (`participant_e2e.cy.js`, 11 tests)
 

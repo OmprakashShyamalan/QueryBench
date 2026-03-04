@@ -1,6 +1,6 @@
 // Admin E2E Test
 // Covers the full admin setup flow:
-// Login → Create Participant → Create Infrastructure → Create Questions → Create Assessment → Assign
+// Login → Create Participant → Create Infrastructure → Create Questions → Create Assessment → Assign → Logout
 // Session data is written to cypress/fixtures/e2e_session.json for participant_e2e.cy.js to consume.
 
 describe('Admin Setup E2E', () => {
@@ -244,5 +244,10 @@ describe('Admin Setup E2E', () => {
     cy.contains(participant.username).should('exist');
     cy.contains(assessmentName).should('exist');
     cy.contains('PENDING').should('exist');
+  });
+
+  it('7. Admin Logs Out', () => {
+    cy.get('button[title="Sign Out"]').click();
+    cy.get('input[name="username"]', { timeout: 10000 }).should('be.visible');
   });
 });

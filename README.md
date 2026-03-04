@@ -69,8 +69,8 @@ QueryBench/
 │
 ├── cypress/                     # End-to-end tests
 │   ├── e2e/
-│   │   ├── admin_e2e.cy.js      # Admin setup flow (6 tests)
-│   │   └── participant_e2e.cy.js # Participant assessment flow (9 tests)
+│   │   ├── admin_e2e.cy.js      # Admin setup flow (7 tests)
+│   │   └── participant_e2e.cy.js # Participant assessment flow (11 tests)
 │   └── support/
 │       ├── e2e.ts
 │       └── commands.ts
@@ -159,7 +159,7 @@ Tests are split into two suites that run in alphabetical order:
 
 | Suite | File | Tests | Description |
 |---|---|---|---|
-| Admin | `admin_e2e.cy.js` | 6 | Admin login → create user, infra, questions, assessment, assignment |
+| Admin | `admin_e2e.cy.js` | 7 | Admin login → create user, infra, questions, assessment, assignment, logout |
 | Participant | `participant_e2e.cy.js` | 11 | Login → schema explorer, ER diagram, wrong/correct answers, submit → admin verifies |
 
 ```powershell
