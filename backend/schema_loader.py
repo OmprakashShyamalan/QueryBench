@@ -123,8 +123,9 @@ def inspect_schema(db_config_id: int = None, conn_str: Optional[str] = None, sol
     """
     Extracts schema metadata (Tables, Columns, PKs, FKs) from the target database.
 
-    Returns the complete schema for all user tables — no filtering by solution query.
-    Participants need the full data model to understand context and write JOINs freely.
+    When solution_query is provided, only the tables referenced by that query are
+    returned, along with FK relationships between those tables.
+    Falls back to the full schema when solution_query is absent or matches nothing.
 
     If conn_str is provided, connects directly using that string.
     Otherwise falls back to the primary router connection.
@@ -138,7 +139,28 @@ def inspect_schema(db_config_id: int = None, conn_str: Optional[str] = None, sol
         cursor = conn.cursor()
         cursor.execute(_META_QUERY)
         rows = cursor.fetchall()
-        return _parse_rows(rows)
+        full_schema = _parse_rows(rows)
+
+        if solution_query:
+            referenced = extract_tables_from_sqlserver(solution_query)
+            if referenced:
+                referenced_set = {t.lower() for t in referenced}
+                filtered_tables = [
+                    t for t in full_schema['tables']
+                    if t['name'].lower() in referenced_set
+                ]
+                if filtered_tables:
+                    present = {t['name'].lower() for t in filtered_tables}
+                    for t in filtered_tables:
+                        t['columns'] = [
+                            col if not (col.get('isForeignKey') and col.get('references'))
+                            or col['references']['table'].lower() in present
+                            else {k: v for k, v in col.items() if k != 'references'}
+                            for col in t['columns']
+                        ]
+                    return {'tables': filtered_tables}
+
+        return full_schema
     except Exception as e:
         return {"error": str(e), "tables": []}
     finally:
