@@ -7,8 +7,8 @@
 //   Q2 — Correct syntax,   : Missing column (Phone)  → "Result Mismatch"
 //        wrong projection
 //   Q3 — Correct answer    : Exact solution query    → "Query Correct!"
-//   Q4 — Correct answer    : Typed, not run (still submitted)
-//   Q5 — Correct answer    : Typed, not run (still submitted)
+//   Q4 — Correct answer    : Run and evaluated       → "Query Correct!"
+//   Q5 — Correct answer    : Run and evaluated       → "Query Correct!"
 // Final: Finish → Confirm → "Assessment Submitted"
 // Epilogue: Admin logs in and verifies the result row appears.
 
@@ -152,23 +152,34 @@ describe('Participant Flow E2E', () => {
     cy.contains('Query Correct', { timeout: 15000 }).should('be.visible');
   });
 
-  // ─── Q4: Correct Answer (typed, not run) ─────────────────────────────────
+  // ─── Q4: Correct Answer ───────────────────────────────────────────────────
 
-  it('8. Q4 — Correct Answer (typed, not run)', () => {
+  it('8. Q4 — Correct Answer', () => {
     cy.contains('button', /^4$/).click();
     cy.contains(questions[3].prompt, { timeout: 5000 }).should('be.visible');
 
-    // Type the correct answer — submission will still capture this query
     typeQuery('SELECT OrderID, CustomerID, OrderDate FROM Orders WHERE YEAR(OrderDate) = 1997 ORDER BY OrderDate;');
+
+    cy.contains('button', 'Run Query').click();
+
+    cy.wait(1000);
+
+    cy.contains('Query Correct', { timeout: 15000 }).should('be.visible');
   });
 
-  // ─── Q5: Correct Answer (typed, not run) ─────────────────────────────────
+  // ─── Q5: Correct Answer ───────────────────────────────────────────────────
 
-  it('9. Q5 — Correct Answer (typed, not run)', () => {
+  it('9. Q5 — Correct Answer', () => {
     cy.contains('button', /^5$/).click();
     cy.contains(questions[4].prompt, { timeout: 5000 }).should('be.visible');
 
     typeQuery('SELECT TOP 5 CustomerID, COUNT(*) AS OrderCount FROM Orders GROUP BY CustomerID ORDER BY OrderCount DESC;');
+
+    cy.contains('button', 'Run Query').click();
+
+    cy.wait(1000);
+
+    cy.contains('Query Correct', { timeout: 15000 }).should('be.visible');
   });
 
   // ─── Submit Assessment ───────────────────────────────────────────────────

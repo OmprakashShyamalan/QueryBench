@@ -142,8 +142,8 @@ Before running, ensure:
 | 5 | Q1 — Wrong Syntax Answer | Submits `SELCT` typo, asserts syntax error feedback |
 | 6 | Q2 — Correct Syntax, Wrong Projection | Submits a query missing a column, asserts incorrect answer feedback |
 | 7 | Q3 — Correct Answer | Submits a correct query, asserts "Query Correct!" |
-| 8 | Q4 — Correct Answer (typed, not run) | Types answer without running — asserts it is saved |
-| 9 | Q5 — Correct Answer (typed, not run) | Types answer without running — asserts it is saved |
+| 8 | Q4 — Correct Answer | Runs the correct query, asserts "Query Correct!" |
+| 9 | Q5 — Correct Answer | Runs the correct query, asserts "Query Correct!" |
 | 10 | Participant Submits Assessment | Clicks Submit, confirms, asserts "Assessment Submitted" |
 | 11 | Admin Verifies Results | Logs back in as admin, opens Results tab, asserts attempt is recorded with a score |
 
