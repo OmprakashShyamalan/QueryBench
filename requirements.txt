@@ -1,7 +1,7 @@
-Django>=6.0
+Django>=5.2,<6.0
 djangorestframework>=3.16
 django-cors-headers>=4.9
-django-mssql-backend>=2.8.1
+mssql-django>=1.6
 django-csp>=3.8
 pyodbc>=5.0
 python-dotenv>=1.2

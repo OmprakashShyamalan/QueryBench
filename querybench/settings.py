@@ -154,14 +154,18 @@ CSRF_COOKIE_SECURE = (ENV == "prod")
 SECURE_CONTENT_TYPE_NOSNIFF = True   # X-Content-Type-Options: nosniff
 X_FRAME_OPTIONS = "DENY"             # Clickjacking protection (also handled by XFrameOptionsMiddleware)
 
-# ── Content Security Policy ────────────────────────────────────────────────────
+# ── Content Security Policy (django-csp >= 4.0 format) ────────────────────────
 # Default: self-only. No external CDNs allowed.
 # Add 'unsafe-inline' or hashes here only if the Vite build requires it.
-# In prod, consider restricting CONNECT_SRC to the API origin only.
-CSP_DEFAULT_SRC = ("'self'",)
-CSP_SCRIPT_SRC = ("'self'",)
-CSP_STYLE_SRC = ("'self'",)
-CSP_IMG_SRC = ("'self'", "data:")
+# In prod, consider restricting connect-src to the API origin only.
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": ("'self'",),
+        "script-src": ("'self'",),
+        "style-src": ("'self'",),
+        "img-src": ("'self'", "data:"),
+    }
+}
 
 # ── Enterprise SSO / OIDC (placeholder — disabled by default) ─────────────────
 # To enable: set QB_USE_SSO=true and supply the OIDC_* env vars below.

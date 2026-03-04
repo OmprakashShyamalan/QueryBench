@@ -93,6 +93,8 @@ QueryBench/
 | Node.js | 20+ |
 | ODBC Driver | 17 or 18 for SQL Server |
 
+> **Django version note**: `requirements.txt` pins `Django>=5.2,<6.0` because the SQL Server backend (`mssql-django`) does not yet support Django 6.x. Do not upgrade Django beyond 5.2.x until `mssql-django` publishes a Django 6.0-compatible release.
+
 ### 1. Backend (Django)
 
 ```bash
@@ -267,3 +269,5 @@ Create a dedicated SQL Server login with `SELECT`-only permission on all target 
 | Port conflict | Change `8080` in `runserver` or update `server.port` in `vite.config.ts` |
 | Cypress `Illegal instruction` | Run via `run_cypress_clean.ps1` instead of `npx cypress` |
 | `Cannot execute empty query` | The CodeMirror editor must have content before clicking Run Query |
+| `'mssql' isn't an available database backend` | `mssql-django` is missing — run `pip install -r requirements.txt`. Do not install `django-mssql-backend`; the project uses `mssql-django` (Microsoft's official backend). |
+| `csp.E001` — django-csp settings format error | `django-csp` ≥ 4.0 uses `CONTENT_SECURITY_POLICY = {"DIRECTIVES": {...}}` instead of `CSP_*` variables. Check `querybench/settings.py` for the correct format. |
