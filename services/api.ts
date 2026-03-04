@@ -192,13 +192,15 @@ export interface ApiValidationResult {
 
 export interface ApiSchemaTable {
   name: string;
+  schema: string;
+  qualifiedName: string;
   columns: {
     name: string;
     type: string;
     isNullable: boolean;
     isPrimaryKey: boolean;
     isForeignKey: boolean;
-    references?: { table: string; column: string };
+    references?: { table: string; schema: string; qualifiedTable: string; column: string };
   }[];
 }
 

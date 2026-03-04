@@ -58,17 +58,20 @@ from typing import Dict, List, Any, Optional
 from .config import PRIMARY_CONN
 from .db_router import db_router
 
-# SQL Server introspection query - extracts tables, columns, PKs, FKs
+# SQL Server introspection query - extracts schemas, tables, columns, PKs, FKs
 _META_QUERY = """
 SELECT
+    s.name AS schema_name,
     t.name AS table_name,
     c.name AS column_name,
     ty.name AS data_type,
     c.is_nullable,
     CASE WHEN pk.column_id IS NOT NULL THEN 1 ELSE 0 END AS is_primary_key,
+    fk.referenced_schema,
     fk.referenced_table,
     fk.referenced_column
 FROM sys.tables t
+INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
 INNER JOIN sys.columns c ON t.object_id = c.object_id
 INNER JOIN sys.types ty ON c.user_type_id = ty.user_type_id
 LEFT JOIN (
@@ -81,31 +84,52 @@ LEFT JOIN (
     SELECT
         fkc.parent_object_id,
         fkc.parent_column_id,
+        rs.name AS referenced_schema,
         rt.name AS referenced_table,
         rc.name AS referenced_column
     FROM sys.foreign_key_columns fkc
     INNER JOIN sys.tables rt ON fkc.referenced_object_id = rt.object_id
+    INNER JOIN sys.schemas rs ON rt.schema_id = rs.schema_id
     INNER JOIN sys.columns rc ON fkc.referenced_object_id = rc.object_id AND fkc.referenced_column_id = rc.column_id
 ) fk ON t.object_id = fk.parent_object_id AND c.column_id = fk.parent_column_id
 WHERE t.is_ms_shipped = 0
-ORDER BY t.name, c.column_id;
+ORDER BY s.name, t.name, c.column_id;
 """
 
 
-def _parse_rows(rows) -> Dict[str, Any]:
+def _parse_rows(rows, schema_filter: str = '') -> Dict[str, Any]:
+    """
+    Parse raw rows from _META_QUERY into a schema dict.
+
+    Each table is keyed as "schema.table" (e.g. "sales.Orders").
+    Tables whose schema does not match schema_filter (when provided) are omitted.
+    The returned table dicts include a "schema" property so the frontend can
+    display fully-qualified names.
+    """
     tables_map: Dict[str, Any] = {}
-    seen_cols: Dict[str, set] = {}  # table_name → set of column names already added
+    seen_cols: Dict[str, set] = {}  # qualified_name → set of column names already added
+    filter_lower = schema_filter.strip().lower()
+
     for row in rows:
-        t_name, c_name, dtype, nullable, is_pk, ref_table, ref_col = row
-        if t_name not in tables_map:
-            tables_map[t_name] = {"name": t_name, "columns": []}
-            seen_cols[t_name] = set()
+        schema_name, t_name, c_name, dtype, nullable, is_pk, ref_schema, ref_table, ref_col = row
+
+        # Apply optional schema scope filter
+        if filter_lower and schema_name.lower() != filter_lower:
+            continue
+
+        qualified = f"{schema_name}.{t_name}"
+
+        if qualified not in tables_map:
+            tables_map[qualified] = {"name": t_name, "schema": schema_name, "qualifiedName": qualified, "columns": []}
+            seen_cols[qualified] = set()
+
         # Skip duplicate column entries.  Duplicates occur when a column participates
         # in multiple FK constraints, causing the LEFT JOIN in _META_QUERY to emit
         # more than one row for the same (table, column) pair.
-        if c_name in seen_cols[t_name]:
+        if c_name in seen_cols[qualified]:
             continue
-        seen_cols[t_name].add(c_name)
+        seen_cols[qualified].add(c_name)
+
         col_meta = {
             "name": c_name,
             "type": dtype.upper(),
@@ -114,14 +138,19 @@ def _parse_rows(rows) -> Dict[str, Any]:
             "isForeignKey": bool(ref_table),
         }
         if ref_table:
-            col_meta["references"] = {"table": ref_table, "column": ref_col}
-        tables_map[t_name]["columns"].append(col_meta)
+            ref_qualified = f"{ref_schema}.{ref_table}" if ref_schema else ref_table
+            col_meta["references"] = {"table": ref_table, "schema": ref_schema or '', "qualifiedTable": ref_qualified, "column": ref_col}
+        tables_map[qualified]["columns"].append(col_meta)
+
     return {"tables": list(tables_map.values())}
 
 
-def inspect_schema(db_config_id: int = None, conn_str: Optional[str] = None, solution_query: Optional[str] = None) -> Dict[str, Any]:
+def inspect_schema(db_config_id: int = None, conn_str: Optional[str] = None, solution_query: Optional[str] = None, schema_filter: str = '') -> Dict[str, Any]:
     """
     Extracts schema metadata (Tables, Columns, PKs, FKs) from the target database.
+
+    schema_filter: when non-empty, only tables in that schema are returned
+                   (e.g. "sales" returns only sales.* tables).
 
     When solution_query is provided, only the tables referenced by that query are
     returned, along with FK relationships between those tables.
@@ -139,22 +168,27 @@ def inspect_schema(db_config_id: int = None, conn_str: Optional[str] = None, sol
         cursor = conn.cursor()
         cursor.execute(_META_QUERY)
         rows = cursor.fetchall()
-        full_schema = _parse_rows(rows)
+        full_schema = _parse_rows(rows, schema_filter=schema_filter)
 
         if solution_query:
             referenced = extract_tables_from_sqlserver(solution_query)
             if referenced:
-                referenced_set = {t.lower() for t in referenced}
+                # Build lookup sets: both bare names ("orders") and qualified names
+                # ("sales.orders") so either form in a solution query matches correctly.
+                referenced_lower = {t.lower() for t in referenced}
                 filtered_tables = [
                     t for t in full_schema['tables']
-                    if t['name'].lower() in referenced_set
+                    if t['qualifiedName'].lower() in referenced_lower
+                    or t['name'].lower() in referenced_lower
                 ]
                 if filtered_tables:
-                    present = {t['name'].lower() for t in filtered_tables}
+                    present_qualified = {t['qualifiedName'].lower() for t in filtered_tables}
+                    present_bare = {t['name'].lower() for t in filtered_tables}
                     for t in filtered_tables:
                         t['columns'] = [
                             col if not (col.get('isForeignKey') and col.get('references'))
-                            or col['references']['table'].lower() in present
+                            or col['references']['qualifiedTable'].lower() in present_qualified
+                            or col['references']['table'].lower() in present_bare
                             else {k: v for k, v in col.items() if k != 'references'}
                             for col in t['columns']
                         ]

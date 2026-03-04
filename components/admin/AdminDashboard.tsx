@@ -70,13 +70,13 @@ function mapAssessment(a: ApiAssessment, configs: ConfigWithId[], allQuestions: 
     attempts_allowed: a.attempts_allowed,
     is_published: a.is_published,
     questions: linkedQs,
-    db_config: cfg ?? { host: '', port: 1433, database_name: '', username: '', password_secret_ref: '', provider: 'SQL_SERVER' },
+    db_config: cfg ?? { host: '', port: 1433, database_name: '', username: '', password_secret_ref: '', provider: 'SQL_SERVER', default_schema: 'dbo', schema_filter: '' },
   };
 }
 
 function mapAssignment(a: ApiAssignment, assessments: AssessmentWithId[]): AssignmentRow {
   const assessment = assessments.find(as => as._id === a.assessment)
-    ?? { _id: a.assessment, id: String(a.assessment), name: a.assessment_name, description: '', duration_minutes: 0, attempts_allowed: 1, is_published: false, questions: [], db_config: { host: '', port: 1433, database_name: '', username: '', password_secret_ref: '', provider: 'SQL_SERVER' as const } };
+    ?? { _id: a.assessment, id: String(a.assessment), name: a.assessment_name, description: '', duration_minutes: 0, attempts_allowed: 1, is_published: false, questions: [], db_config: { host: '', port: 1433, database_name: '', username: '', password_secret_ref: '', provider: 'SQL_SERVER' as const, default_schema: 'dbo', schema_filter: '' } };
   return {
     _id: a.id,
     id: String(a.id),
@@ -785,6 +785,8 @@ const InfraConfigForm: React.FC<{ initial: any; onSave: (d: any) => void; onCanc
     username: initial?.username ?? '',
     password_secret_ref: initial?.password_secret_ref ?? '',
     provider: initial?.provider ?? 'SQL_SERVER',
+    default_schema: initial?.default_schema ?? 'dbo',
+    schema_filter: initial?.schema_filter ?? '',
   });
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>(isNew ? 'idle' : 'ok');
   const [testMsg, setTestMsg] = useState('');
@@ -895,6 +897,32 @@ const InfraConfigForm: React.FC<{ initial: any; onSave: (d: any) => void; onCanc
             Windows Authentication is enabled — credentials are not required.
           </div>
         )}
+      </div>
+
+      {/* Schema Settings */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Default Schema</label>
+          <p className="text-[10px] text-slate-400 mb-2">Used for unqualified table names (e.g. <span className="font-mono">dbo</span>)</p>
+          <input
+            name="default_schema"
+            value={form.default_schema}
+            onChange={e => set('default_schema', e.target.value)}
+            placeholder="dbo"
+            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-xs"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Schema Filter</label>
+          <p className="text-[10px] text-slate-400 mb-2">Explorer only shows this schema's tables. Leave blank for all schemas.</p>
+          <input
+            name="schema_filter"
+            value={form.schema_filter}
+            onChange={e => set('schema_filter', e.target.value)}
+            placeholder="(all schemas)"
+            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-xs"
+          />
+        </div>
       </div>
 
       {/* Test connection */}

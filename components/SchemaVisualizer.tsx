@@ -22,7 +22,10 @@ const TableNode = ({ data }: any) => {
     <div className="flex flex-col text-[10px] bg-white rounded-lg overflow-hidden border border-slate-200 shadow-xl min-w-[180px]">
       {/* Table Header */}
       <div className="bg-slate-800 px-3 py-2 text-white font-bold flex items-center justify-between border-b border-slate-700">
-        <span className="truncate mr-2 uppercase tracking-wider">{data.label}</span>
+        <span className="truncate mr-2 uppercase tracking-wider">
+          {data.schemaPrefix && <span className="text-slate-400 font-normal normal-case mr-0.5">{data.schemaPrefix}.</span>}
+          {data.label}
+        </span>
         <span className="text-[9px] bg-slate-700 px-1.5 py-0.5 rounded opacity-80">{data.columns.length}</span>
       </div>
       
@@ -97,9 +100,9 @@ const SchemaVisualizerInner: React.FC<Props> = ({ metadata }) => {
 
   const { initialNodes, initialEdges } = useMemo(() => {
     const newNodes = metadata.tables.map((table) => ({
-      id: table.name,
+      id: table.qualifiedName,
       type: 'table',
-      data: { label: table.name, columns: table.columns },
+      data: { label: table.name, schemaPrefix: table.schema !== 'dbo' ? table.schema : '', columns: table.columns },
       position: { x: 0, y: 0 },
       className: 'react-flow__node-table',
     }));
@@ -109,9 +112,9 @@ const SchemaVisualizerInner: React.FC<Props> = ({ metadata }) => {
       table.columns.forEach((col) => {
         if (col.isForeignKey && col.references) {
           newEdges.push({
-            id: `e-${table.name}-${col.name}-${col.references.table}`,
-            source: table.name,
-            target: col.references.table,
+            id: `e-${table.qualifiedName}-${col.name}-${col.references.qualifiedTable}`,
+            source: table.qualifiedName,
+            target: col.references.qualifiedTable,
             sourceHandle: `source-${col.name}`,
             targetHandle: `target-${col.references.column}`,
             type: 'smoothstep',

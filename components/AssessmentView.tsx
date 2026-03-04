@@ -236,16 +236,29 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
 
     const matchText = word.text.toLowerCase();
     
-    // 1. Add all table names with high boost priority
+    // 1. Add all table names with high boost priority (both bare and schema-qualified)
     schema.tables.forEach(table => {
+      // Bare table name (e.g. "Orders")
       if (table.name.toLowerCase().startsWith(matchText) || matchText.length === 0) {
         completions.Tables.push({
           label: table.name,
           type: 'class',
-          info: `Table (${table.columns.length} columns)`,
+          info: `Table ${table.qualifiedName} (${table.columns.length} columns)`,
           boost: 100,
           detail: `${table.columns.length} columns`,
         });
+      }
+      // Schema-qualified name (e.g. "sales.Orders") — shown when user types "sales."
+      if (table.schema !== 'dbo') {
+        if (table.qualifiedName.toLowerCase().startsWith(matchText) || matchText.length === 0) {
+          completions.Tables.push({
+            label: table.qualifiedName,
+            type: 'class',
+            info: `Table (${table.columns.length} columns)`,
+            boost: 99,
+            detail: `${table.columns.length} columns`,
+          });
+        }
       }
     });
 
@@ -253,19 +266,19 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
     schema.tables.forEach(table => {
       table.columns.forEach(col => {
         const colLower = col.name.toLowerCase();
-        
+
         // Show both unprefixed and prefixed versions
         if (colLower.startsWith(matchText) || matchText.length === 0) {
           // Unprefixed column name
           completions.Columns.push({
             label: col.name,
             type: 'property',
-            info: `${col.type} (from ${table.name})`,
+            info: `${col.type} (from ${table.qualifiedName})`,
             boost: 90,
-            detail: `${table.name}.${col.name}`,
+            detail: `${table.qualifiedName}.${col.name}`,
           });
-          
-          // Also add prefixed version
+
+          // Also add bare-table-prefixed version (e.g. Orders.CustomerID)
           const prefixed = `${table.name}.${col.name}`;
           if (prefixed.toLowerCase().startsWith(matchText)) {
             completions.Columns.push({
@@ -274,6 +287,19 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
               info: `${col.type}`,
               boost: 85,
             });
+          }
+
+          // Also add schema-qualified prefixed version for non-dbo tables
+          if (table.schema !== 'dbo') {
+            const qualifiedPrefixed = `${table.qualifiedName}.${col.name}`;
+            if (qualifiedPrefixed.toLowerCase().startsWith(matchText)) {
+              completions.Columns.push({
+                label: qualifiedPrefixed,
+                type: 'property',
+                info: `${col.type}`,
+                boost: 84,
+              });
+            }
           }
         }
       });
@@ -410,8 +436,8 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
 
   const currentQuestion: ApiQuestion = assessment.questions_data[currentQuestionIndex];
   const currentQuery = queries[currentQuestion.id] || '';
-  const filteredTables = schema?.tables.filter(t => 
-    t.name.toLowerCase().includes(schemaSearch.toLowerCase())
+  const filteredTables = schema?.tables.filter(t =>
+    t.qualifiedName.toLowerCase().includes(schemaSearch.toLowerCase())
   ) || [];
 
   return (
@@ -487,8 +513,11 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
                 <div className="relative mb-4"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input type="text" placeholder="Search tables..." value={schemaSearch} onChange={(e) => setSchemaSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none" /></div>
                 <div className="space-y-4 overflow-y-auto pr-1 flex-1">
                   {filteredTables.map(table => (
-                    <div key={table.name} className="border border-slate-100 rounded-xl bg-white overflow-hidden shadow-sm">
-                      <div className="bg-slate-800 px-3 py-1.5 text-white text-[10px] font-bold flex justify-between uppercase tracking-wider">{table.name} <span className="text-slate-400">{table.columns.length}</span></div>
+                    <div key={table.qualifiedName} className="border border-slate-100 rounded-xl bg-white overflow-hidden shadow-sm">
+                      <div className="bg-slate-800 px-3 py-1.5 text-white text-[10px] font-bold flex justify-between uppercase tracking-wider">
+                        <span>{table.schema !== 'dbo' && <span className="text-slate-400 font-normal normal-case mr-0.5">{table.schema}.</span>}{table.name}</span>
+                        <span className="text-slate-400">{table.columns.length}</span>
+                      </div>
                       <div className="p-1">{table.columns.map(col => <div key={col.name} className="flex items-center justify-between text-[10px] px-2 py-1 hover:bg-slate-50 rounded"><span>{col.name}</span><span className="text-slate-400 uppercase text-[8px]">{col.type}</span></div>)}</div>
                     </div>
                   ))}
@@ -631,8 +660,8 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Available Tables:</p>
                     <div className="flex flex-wrap gap-2">
                       {schema.tables.map(table => (
-                        <div key={table.name} className="bg-slate-700/50 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 border border-slate-600/50">
-                          {table.name}
+                        <div key={table.qualifiedName} className="bg-slate-700/50 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 border border-slate-600/50">
+                          {table.qualifiedName}
                         </div>
                       ))}
                     </div>

@@ -19,11 +19,13 @@ export interface ColumnMetadata {
   isNullable: boolean;
   isPrimaryKey: boolean;
   isForeignKey: boolean;
-  references?: { table: string; column: string };
+  references?: { table: string; schema: string; qualifiedTable: string; column: string };
 }
 
 export interface TableMetadata {
   name: string;
+  schema: string;
+  qualifiedName: string;
   columns: ColumnMetadata[];
 }
 
@@ -41,6 +43,8 @@ export interface DatabaseConfig {
   password?: string; // Direct password entry for MVP/Dev
   password_secret_ref: string; // Reference to Azure Key Vault / Environment Variable
   provider: 'SQL_SERVER' | 'POSTGRES' | 'SQLITE';
+  default_schema: string;   // Default schema for unqualified name resolution (e.g. "dbo")
+  schema_filter: string;    // When set, explorer only shows tables in this schema
 }
 
 export interface Question {

@@ -204,7 +204,7 @@ def schema_view(request):
         return Response({'error': 'DatabaseConfig not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     conn_str = _build_conn_str(config)
-    schema = inspect_schema(conn_str=conn_str, solution_query=solution_query)
+    schema = inspect_schema(conn_str=conn_str, solution_query=solution_query, schema_filter=config.schema_filter or '')
     return Response(schema)
 
 

@@ -47,6 +47,9 @@ export const InfrastructureTab: React.FC<Props> = ({ targets, onAdd, onEdit, onD
             <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 px-2 py-1 rounded w-fit">
               <Server className="w-3 h-3" /> {target.provider}
             </div>
+            {target.schema_filter && (
+              <p className="text-[10px] font-mono text-slate-400 mt-2">Schema: <span className="text-slate-600">{target.schema_filter}</span></p>
+            )}
           </div>
         ))}
       </div>

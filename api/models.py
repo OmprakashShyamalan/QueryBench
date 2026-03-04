@@ -17,6 +17,14 @@ class DatabaseConfig(models.Model):
     username = models.CharField(max_length=128, blank=True, default='')
     password_secret_ref = models.CharField(max_length=255, blank=True, default='')
     provider = models.CharField(max_length=50, choices=PROVIDER_CHOICES)
+    default_schema = models.CharField(
+        max_length=128, blank=True, default='dbo',
+        help_text="Default schema used for unqualified table resolution (SQL Server default: dbo).",
+    )
+    schema_filter = models.CharField(
+        max_length=128, blank=True, default='',
+        help_text="When set, the schema explorer only shows tables belonging to this schema.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
