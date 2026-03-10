@@ -1,0 +1,3 @@
+Method,Name,Error,Occurrences
+POST,/api/v1/attempts/validate_query_async/,HTTPError('429 Client Error: Too Many Requests for url: /api/v1/attempts/validate_query_async/'),9
+POST,/api/v1/attempts/run_query_async/,HTTPError('429 Client Error: Too Many Requests for url: /api/v1/attempts/run_query_async/'),9
