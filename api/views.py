@@ -1,8 +1,12 @@
 
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from uuid import uuid4
 from django.contrib.auth import authenticate, login, logout # type: ignore
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
@@ -12,8 +16,129 @@ from .models import DatabaseConfig, Question, Assessment, AssessmentQuestion, As
 from .serializers import *
 from backend.runner import evaluate_submission, execute_query, validate_sql_security
 from backend.schema_loader import inspect_schema
+from backend.crypto import decrypt_field
 
 logger = logging.getLogger(__name__)
+
+# Async job executor — threads are per-process; job state lives in Django cache
+# so results are visible across workers when the cache backend is Redis.
+QUERY_JOB_TTL_SECONDS = 10 * 60
+_query_job_executor = ThreadPoolExecutor(max_workers=6)
+
+_JOB_KEY = "qjob:{}"
+
+
+def _start_query_job(work_fn):
+    job_id = uuid4().hex
+    cache.set(_JOB_KEY.format(job_id), {'status': 'queued'}, timeout=QUERY_JOB_TTL_SECONDS)
+
+    def _runner():
+        cache.set(_JOB_KEY.format(job_id), {'status': 'running'}, timeout=QUERY_JOB_TTL_SECONDS)
+        try:
+            result = work_fn()
+            cache.set(_JOB_KEY.format(job_id), {'status': 'completed', 'result': result}, timeout=QUERY_JOB_TTL_SECONDS)
+        except Exception as e:
+            logger.error(f"Async job failed for job_id={job_id}: {e}", exc_info=True)
+            cache.set(_JOB_KEY.format(job_id), {'status': 'failed', 'error': str(e)}, timeout=QUERY_JOB_TTL_SECONDS)
+
+    _query_job_executor.submit(_runner)
+    return job_id
+
+
+def _get_query_job(job_id: str):
+    return cache.get(_JOB_KEY.format(job_id))
+
+
+def _is_better_result(new_status: str, new_time_ms: int, current_best_status: str, current_best_time_ms: int) -> bool:
+    """
+    Determines if a new result is better than the current best.
+    
+    Logic:
+    - CORRECT is always better than INCORRECT or NOT_ATTEMPTED
+    - Among CORRECT results, faster execution time is better
+    - INCORRECT is better than NOT_ATTEMPTED
+    """
+    # Status priority: CORRECT > INCORRECT > NOT_ATTEMPTED
+    status_priority = {
+        'CORRECT': 3,
+        'INCORRECT': 2,
+        'NOT_ATTEMPTED': 1,
+        '': 0  # Empty string for no previous best
+    }
+    
+    new_priority = status_priority.get(new_status, 0)
+    current_priority = status_priority.get(current_best_status, 0)
+    
+    # If new status has higher priority, it's better
+    if new_priority > current_priority:
+        return True
+    
+    # If new status has lower priority, it's not better
+    if new_priority < current_priority:
+        return False
+    
+    # Same status - compare execution times (only meaningful for CORRECT status)
+    # For CORRECT results, faster is better
+    if new_status == 'CORRECT' and current_best_status == 'CORRECT':
+        if new_time_ms is not None and current_best_time_ms is not None:
+            return new_time_ms < current_best_time_ms
+        elif new_time_ms is not None:
+            return True  # New has time, old doesn't
+        return False  # Neither has time or old has time but new doesn't
+    
+    # For same status but not CORRECT, newer is considered equal (not better)
+    return False
+
+
+def _update_best_result_if_needed(
+    attempt_answer: AttemptAnswer,
+    new_status: str,
+    new_query: str,
+    new_time_ms: int
+) -> bool:
+    """
+    Updates the best result fields in an AttemptAnswer if the new result is better.
+    
+    Returns True if the best result was updated, False otherwise.
+    """
+    is_better = _is_better_result(
+        new_status, 
+        new_time_ms, 
+        attempt_answer.best_status, 
+        attempt_answer.best_execution_time_ms
+    )
+    
+    if is_better:
+        attempt_answer.best_status = new_status
+        attempt_answer.best_query = new_query
+        attempt_answer.best_execution_time_ms = new_time_ms
+        attempt_answer.best_achieved_at = timezone.now()
+        return True
+    
+    return False
+
+
+def _attempt_expired(attempt) -> bool:
+    """
+    Returns True if the attempt has exceeded the assessment's allowed duration
+    plus the configured grace period (SUBMIT_GRACE_SECONDS, default 60 s).
+
+    The grace period covers:
+      - auto-finalize latency: the frontend timer fires at t=0 and immediately
+        calls submit_answer for all questions before calling finalize; those HTTP
+        requests arrive on the server a few hundred ms after the hard deadline
+      - client/server clock skew and slow networks
+
+    Hard cheating (submitting minutes after expiry) is still blocked.
+    Set SUBMIT_GRACE_SECONDS=0 to enforce strictly (breaks auto-finalize).
+    """
+    import datetime
+    from backend.config import SUBMIT_GRACE_SECONDS
+    duration_minutes = attempt.assignment.assessment.duration_minutes
+    deadline = attempt.started_at + datetime.timedelta(
+        minutes=duration_minutes, seconds=SUBMIT_GRACE_SECONDS
+    )
+    return timezone.now() > deadline
 
 
 def _user_to_dict(user):
@@ -44,7 +169,7 @@ def _build_conn_str(config: DatabaseConfig) -> str:
             f"Server={host};"
             f"Database={db};"
             f"UID={config.username};"
-            f"PWD={config.password_secret_ref};"
+            f"PWD={decrypt_field(config.password_secret_ref)};"
         )
 
     # For named instances (e.g. localhost\SQLEXPRESS), port is resolved via SQL Server Browser.
@@ -271,6 +396,27 @@ class AssignmentViewSet(viewsets.ModelViewSet):
                 )
             return Response(AttemptSerializer(existing).data)
 
+        # Reject new attempts started after the due date.
+        if assignment.due_date and timezone.now() > assignment.due_date:
+            return Response(
+                {'error': 'The due date for this assignment has passed. No new attempts are allowed.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Enforce attempts_allowed — count only submitted (completed) attempts.
+        attempts_allowed = assignment.assessment.attempts_allowed
+        submitted_count = assignment.attempts.filter(submitted_at__isnull=False).count()
+        if submitted_count >= attempts_allowed:
+            return Response(
+                {
+                    'error': (
+                        f'Attempt limit reached. '
+                        f'You have used {submitted_count} of {attempts_allowed} allowed attempt(s).'
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         # Create a fresh attempt
         attempt = Attempt.objects.create(assignment=assignment)
         assignment.status = 'IN_PROGRESS'
@@ -279,12 +425,29 @@ class AssignmentViewSet(viewsets.ModelViewSet):
 
 
 class AttemptViewSet(viewsets.ModelViewSet):
-    queryset = Attempt.objects.select_related('assignment__assessment').prefetch_related('answers').all()
+    queryset = Attempt.objects.none()  # required by DRF router for basename; get_queryset() overrides at runtime
     serializer_class = AttemptSerializer
+
+    def get_queryset(self):
+        qs = Attempt.objects.select_related('assignment__assessment').prefetch_related('answers')
+        # Staff can access all attempts (for grading/results).
+        # Participants are restricted to their own attempts — this implicitly
+        # protects every detail action (submit_answer, finalize, close_session)
+        # without needing per-action ownership checks.
+        if not self.request.user.is_staff:
+            qs = qs.filter(assignment__user=self.request.user)
+        return qs
 
     @action(detail=True, methods=['post'])
     def submit_answer(self, request, pk=None):
         attempt = self.get_object()
+
+        if _attempt_expired(attempt):
+            return Response(
+                {'error': 'Time is up. The assessment deadline has passed and no further answers can be submitted.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         question_id = request.data.get('question_id')
         participant_query = request.data.get('query')
 
@@ -311,19 +474,52 @@ class AttemptViewSet(viewsets.ModelViewSet):
             order_sensitive=question.order_sensitive,
         )
 
-        # Persist the answer
-        AttemptAnswer.objects.update_or_create(
+        # Get or create the answer record
+        attempt_answer, created = AttemptAnswer.objects.get_or_create(
             attempt=attempt,
             question=question,
             defaults={
                 'participant_query': participant_query,
                 'status': eval_result.get('status', 'INCORRECT'),
                 'execution_time_ms': eval_result.get('execution_metadata', {}).get('duration_ms'),
-                'feedback': eval_result.get('feedback', '')
+                'feedback': eval_result.get('feedback', ''),
+                'attempt_count': 1
             }
         )
 
-        return Response(eval_result)
+        if not created:
+            # Update current attempt
+            attempt_answer.participant_query = participant_query
+            attempt_answer.status = eval_result.get('status', 'INCORRECT')
+            attempt_answer.execution_time_ms = eval_result.get('execution_metadata', {}).get('duration_ms')
+            attempt_answer.feedback = eval_result.get('feedback', '')
+            attempt_answer.attempt_count += 1
+
+        # Check and update best result
+        new_status = eval_result.get('status', 'INCORRECT')
+        new_time_ms = eval_result.get('execution_metadata', {}).get('duration_ms')
+        
+        is_new_best = _update_best_result_if_needed(
+            attempt_answer,
+            new_status,
+            participant_query,
+            new_time_ms
+        )
+        
+        attempt_answer.save()
+
+        # Add best result info to response
+        response_data = dict(eval_result)
+        response_data['is_new_best'] = is_new_best
+        response_data['attempt_count'] = attempt_answer.attempt_count
+        if is_new_best:
+            response_data['best_result'] = {
+                'status': attempt_answer.best_status,
+                'execution_time_ms': attempt_answer.best_execution_time_ms,
+                'achieved_at': attempt_answer.best_achieved_at
+            }
+
+        return Response(response_data)
 
     @action(detail=True, methods=['post'])
     def finalize(self, request, pk=None):
@@ -335,9 +531,20 @@ class AttemptViewSet(viewsets.ModelViewSet):
         if attempt.submitted_at:
             return Response({'error': 'Attempt already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        total_questions = attempt.assignment.assessment.questions.count()
-        correct = attempt.answers.filter(status='CORRECT').count()
-        score = (Decimal(correct) / Decimal(total_questions) * 100) if total_questions > 0 else Decimal(0)
+        # Build a weight map: {question_id: weight} from the through table
+        aq_qs = AssessmentQuestion.objects.filter(
+            assessment=attempt.assignment.assessment
+        ).values('question_id', 'weight')
+        weight_map = {row['question_id']: Decimal(str(row['weight'])) for row in aq_qs}
+
+        total_weight = sum(weight_map.values())
+        correct_question_ids = set(
+            attempt.answers.filter(status='CORRECT').values_list('question_id', flat=True)
+        )
+        earned_weight = sum(w for qid, w in weight_map.items() if qid in correct_question_ids)
+
+        score = (earned_weight / total_weight * 100) if total_weight > 0 else Decimal(0)
+        score = score.quantize(Decimal('0.01'))
 
         attempt.submitted_at = timezone.now()
         attempt.score = score
@@ -348,8 +555,8 @@ class AttemptViewSet(viewsets.ModelViewSet):
 
         return Response({
             'score': float(score),
-            'correct': correct,
-            'total': total_questions,
+            'correct': len(correct_question_ids),
+            'total': len(weight_map),
             'submitted_at': attempt.submitted_at,
         })
 
@@ -425,14 +632,71 @@ class AttemptViewSet(viewsets.ModelViewSet):
         return Response({'columns': [], 'rows': [], 'execution_time_ms': duration})
 
     @action(detail=False, methods=['post'])
+    def run_query_async(self, request):
+        """
+        Starts async query execution and returns a job_id for polling.
+        """
+        query = request.data.get('query')
+        config_id = request.data.get('config_id')
+
+        if not query:
+            return Response({'error': 'Query required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        conn_str = None
+        if config_id:
+            try:
+                config = DatabaseConfig.objects.get(pk=config_id)
+                conn_str = _build_conn_str(config)
+            except DatabaseConfig.DoesNotExist:
+                return Response({'error': 'DatabaseConfig not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        is_safe, validation_msg = validate_sql_security(query)
+        if not is_safe:
+            return Response({'error': validation_msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        def _run_query_job():
+            results, err, duration = execute_query(query, user_id=str(request.user.id), conn_str=conn_str)
+            if err:
+                return {'columns': [], 'rows': [], 'execution_time_ms': duration, 'error': err}
+            if results:
+                columns = list(results[0].keys())
+                rows = [list(row.values()) for row in results]
+                return {'columns': columns, 'rows': rows, 'execution_time_ms': duration}
+            return {'columns': [], 'rows': [], 'execution_time_ms': duration}
+
+        job_id = _start_query_job(_run_query_job)
+        return Response({'job_id': job_id, 'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=False, methods=['get'])
+    def run_query_status(self, request):
+        """
+        Polls status/result for an async query execution job.
+        """
+        job_id = request.query_params.get('job_id', '').strip()
+        if not job_id:
+            return Response({'error': 'job_id query parameter is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        job = _get_query_job(job_id)
+        if not job:
+            return Response({'error': 'Job not found or expired.'}, status=status.HTTP_404_NOT_FOUND)
+
+        payload = {'job_id': job_id, 'status': job.get('status')}
+        if job.get('status') == 'completed':
+            payload['result'] = job.get('result')
+        elif job.get('status') == 'failed':
+            payload['error'] = job.get('error', 'Async query execution failed.')
+        return Response(payload)
+
+    @action(detail=False, methods=['post'])
     def validate_query(self, request):
         """
         Validates a participant's query against expected solution results (real-time feedback).
-        Does NOT score or submit the answer.
+        Does NOT score or submit the answer officially, but DOES track best results if attempt_id is provided.
         """
         query = request.data.get('query')
         question_id = request.data.get('question_id')
         config_id = request.data.get('config_id')
+        attempt_id = request.data.get('attempt_id')  # Optional: track best result when provided
 
         if not query or not question_id:
             return Response({'error': 'Query and question_id are required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -461,6 +725,54 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 conn_str=conn_str,
                 order_sensitive=question.order_sensitive,
             )
+            
+            # Track best result if attempt_id is provided
+            if attempt_id:
+                try:
+                    attempt = Attempt.objects.get(id=attempt_id)
+                    # Verify user owns this attempt (security check)
+                    if attempt.assignment.user == request.user or request.user.is_staff:
+                        # Get or create the answer record
+                        attempt_answer, created = AttemptAnswer.objects.get_or_create(
+                            attempt=attempt,
+                            question=question,
+                            defaults={
+                                'participant_query': '',  # Don't save query for validation
+                                'status': 'NOT_ATTEMPTED',  # Keep official status as not attempted
+                                'attempt_count': 1
+                            }
+                        )
+                        
+                        if not created:
+                            attempt_answer.attempt_count += 1
+                        
+                        # Check and update best result
+                        new_status = eval_result.get('status', 'INCORRECT')
+                        new_time_ms = eval_result.get('execution_metadata', {}).get('duration_ms')
+                        
+                        is_new_best = _update_best_result_if_needed(
+                            attempt_answer,
+                            new_status,
+                            query,
+                            new_time_ms
+                        )
+                        
+                        attempt_answer.save()
+                        
+                        # Add tracking info to response
+                        eval_result['is_new_best'] = is_new_best
+                        eval_result['attempt_count'] = attempt_answer.attempt_count
+                        if is_new_best:
+                            eval_result['best_result'] = {
+                                'status': attempt_answer.best_status,
+                                'execution_time_ms': attempt_answer.best_execution_time_ms,
+                                'achieved_at': attempt_answer.best_achieved_at
+                            }
+                except Attempt.DoesNotExist:
+                    logger.warning(f"Attempt {attempt_id} not found for validate_query tracking")
+                except Exception as e:
+                    logger.error(f"Error tracking best result in validate_query: {e}", exc_info=True)
+            
             return Response(eval_result)
         except Exception as e:
             logger.error(f"Validation error for user {request.user.id}: {str(e)}")
@@ -468,6 +780,119 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 'status': 'ERROR',
                 'feedback': 'Unable to validate query. This may indicate a database connection issue or an invalid solution query.'
             })
+
+    @action(detail=False, methods=['post'])
+    def validate_query_async(self, request):
+        """
+        Starts async query validation and returns a job_id for polling.
+        Tracks best results if attempt_id is provided.
+        """
+        query = request.data.get('query')
+        question_id = request.data.get('question_id')
+        config_id = request.data.get('config_id')
+        attempt_id = request.data.get('attempt_id')  # Optional: track best result when provided
+
+        if not query or not question_id:
+            return Response({'error': 'Query and question_id are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            question = Question.objects.get(id=question_id)
+        except Question.DoesNotExist:
+            return Response({'error': 'Question not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        conn_str = None
+        if config_id:
+            try:
+                config = DatabaseConfig.objects.get(pk=config_id)
+                conn_str = _build_conn_str(config)
+            except DatabaseConfig.DoesNotExist:
+                return Response({'error': 'DatabaseConfig not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Capture user and attempt for the background job
+        user_id = request.user.id
+        user = request.user
+
+        def _validate_query_job():
+            eval_result = evaluate_submission(
+                user_id=str(user_id),
+                question_id=str(question.id),
+                participant_query=query,
+                solution_query=question.solution_query,
+                conn_str=conn_str,
+                order_sensitive=question.order_sensitive,
+            )
+            
+            # Track best result if attempt_id is provided
+            if attempt_id:
+                try:
+                    attempt = Attempt.objects.get(id=attempt_id)
+                    # Verify user owns this attempt (security check)
+                    if attempt.assignment.user_id == user_id or user.is_staff:
+                        # Get or create the answer record
+                        attempt_answer, created = AttemptAnswer.objects.get_or_create(
+                            attempt=attempt,
+                            question=question,
+                            defaults={
+                                'participant_query': '',
+                                'status': 'NOT_ATTEMPTED',
+                                'attempt_count': 1
+                            }
+                        )
+                        
+                        if not created:
+                            attempt_answer.attempt_count += 1
+                        
+                        # Check and update best result
+                        new_status = eval_result.get('status', 'INCORRECT')
+                        new_time_ms = eval_result.get('execution_metadata', {}).get('duration_ms')
+                        
+                        is_new_best = _update_best_result_if_needed(
+                            attempt_answer,
+                            new_status,
+                            query,
+                            new_time_ms
+                        )
+                        
+                        attempt_answer.save()
+                        
+                        # Add tracking info to response
+                        eval_result['is_new_best'] = is_new_best
+                        eval_result['attempt_count'] = attempt_answer.attempt_count
+                        if is_new_best:
+                            eval_result['best_result'] = {
+                                'status': attempt_answer.best_status,
+                                'execution_time_ms': attempt_answer.best_execution_time_ms,
+                                'achieved_at': attempt_answer.best_achieved_at.isoformat() if attempt_answer.best_achieved_at else None
+                            }
+                except Attempt.DoesNotExist:
+                    logger.warning(f"Attempt {attempt_id} not found for validate_query_async tracking")
+                except Exception as e:
+                    logger.error(f"Error tracking best result in validate_query_async: {e}", exc_info=True)
+            
+            return eval_result
+
+        job_id = _start_query_job(_validate_query_job)
+        return Response({'job_id': job_id, 'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=False, methods=['get'])
+    def validate_query_status(self, request):
+        """
+        Polls status/result for an async query validation job.
+        """
+        job_id = request.query_params.get('job_id', '').strip()
+        if not job_id:
+            return Response({'error': 'job_id query parameter is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        job = _get_query_job(job_id)
+        if not job:
+            return Response({'error': 'Job not found or expired.'}, status=status.HTTP_404_NOT_FOUND)
+
+        payload = {'job_id': job_id, 'status': job.get('status')}
+        if job.get('status') == 'completed':
+            payload['result'] = job.get('result')
+        elif job.get('status') == 'failed':
+            payload['error'] = job.get('error', 'Async query validation failed.')
+        return Response(payload)
 
 
 class DatabaseConfigViewSet(viewsets.ModelViewSet):

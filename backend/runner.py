@@ -66,7 +66,13 @@ def execute_query(
     """
     start_time = time.time()
 
-    with query_semaphore:
+    # Wait up to QUERY_TIMEOUT_SECONDS for a concurrency slot before giving up.
+    # Without a timeout, all 20+ queued threads would block indefinitely under
+    # sustained load, exhausting the thread pool silently.
+    if not query_semaphore.acquire(timeout=QUERY_TIMEOUT_SECONDS):
+        return None, "Server is busy. Too many queries are running simultaneously. Please try again in a moment.", (time.time() - start_time) * 1000
+
+    try:
         conn = None
         try:
             if conn_str:
@@ -122,6 +128,8 @@ def execute_query(
         finally:
             if conn:
                 conn.close()
+    finally:
+        query_semaphore.release()
 
 
 def evaluate_submission(

@@ -31,7 +31,7 @@ describe('Admin Setup E2E — SQL Training', () => {
 
   // Credentials loaded from cypress.env.json (gitignored — never committed).
   // Copy cypress.env.json.example → cypress.env.json and fill in the values before running.
-  const infra = {
+  const getInfra = () => ({
     name: 'SQL_TRAINING',
     host: Cypress.env('TRAINING_DB_HOST'),
     port: '1433',
@@ -39,7 +39,7 @@ describe('Admin Setup E2E — SQL Training', () => {
     provider: 'SQL_SERVER',
     username: Cypress.env('TRAINING_DB_USERNAME'),
     password: Cypress.env('TRAINING_DB_PASSWORD'),
-  };
+  });
 
   // ─── sql_store questions ──────────────────────────────────────────────────
 
@@ -186,6 +186,7 @@ describe('Admin Setup E2E — SQL Training', () => {
   // ─── 3. Create infrastructure (SQL auth) ─────────────────────────────────
 
   it('3. Admin Creates Infrastructure (SQL_TRAINING)', () => {
+    const infra = getInfra();
     cy.contains('button', 'infrastructure').click({ force: true });
     cy.contains('button', 'Add Target').click();
 
@@ -197,7 +198,7 @@ describe('Admin Setup E2E — SQL Training', () => {
 
     // SQL Server auth — Trusted Connection stays OFF; fill credentials directly
     cy.get('input[name="username"]').type(infra.username);
-    cy.get('input[name="password"]').type(infra.password);
+    cy.get('input[name="password_secret_ref"]').type(infra.password);
 
     cy.contains('button', 'Test Connection').click();
     cy.wait(2000);
@@ -210,6 +211,7 @@ describe('Admin Setup E2E — SQL Training', () => {
   // ─── 4. Create all 10 questions ───────────────────────────────────────────
 
   it('4. Admin Creates Questions (sql_store + sql_movie)', () => {
+    const infra = getInfra();
     createdTitles = [];
 
     cy.contains('button', 'questions').click({ force: true });
@@ -279,6 +281,7 @@ describe('Admin Setup E2E — SQL Training', () => {
     cy.contains('button', 'assessments').click({ force: true });
     cy.contains('button', 'Create Assessment').click();
 
+    const infra = getInfra();
     cy.get('input[name="name"]').type(assessmentName);
     cy.get('textarea[name="description"]').type('Full E2E Training Assessment — sql_store & sql_movie');
     cy.get('input[name="duration_minutes"]').clear().type('60');

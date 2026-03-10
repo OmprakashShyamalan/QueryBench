@@ -1,19 +1,20 @@
 
 import pyodbc
-import random
+import threading
 import time
-from typing import List, Dict
+from typing import Dict
 from .config import PRIMARY_CONN, REPLICAS
 
 class AssessmentDBRouter:
     """
-    Manages connection strings, connection pooling (via ODBC), 
+    Manages connection strings, connection pooling (via ODBC),
     and routes queries to read replicas with fallback to primary.
     """
     def __init__(self):
         self.primary = PRIMARY_CONN
         self.replicas = REPLICAS
         self._last_index = 0
+        self._index_lock = threading.Lock()
         self._unhealthy_replicas: Dict[str, float] = {}
         self._health_check_cooldown = 300 # 5 minutes
 
@@ -40,9 +41,12 @@ class AssessmentDBRouter:
             # Filter healthy replicas
             healthy = [r for r in self.replicas if self._is_healthy(r)]
             if healthy:
-                # Rotate selection
-                self._last_index = (self._last_index + 1) % len(healthy)
-                targets.append(healthy[self._last_index])
+                # Atomic round-robin: lock covers both the read and write of _last_index
+                # so concurrent threads never see the same index or an out-of-range value.
+                with self._index_lock:
+                    self._last_index = (self._last_index + 1) % len(healthy)
+                    idx = self._last_index
+                targets.append(healthy[idx])
         
         # Always fallback/default to primary
         targets.append(self.primary)

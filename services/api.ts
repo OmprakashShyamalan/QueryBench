@@ -190,6 +190,25 @@ export interface ApiValidationResult {
   execution_metadata?: { duration_ms: number; rows_returned: number };
 }
 
+export interface ApiAsyncJobStart {
+  job_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+}
+
+export interface ApiAsyncQueryJobStatus {
+  job_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  result?: ApiQueryResult;
+  error?: string;
+}
+
+export interface ApiAsyncValidationJobStatus {
+  job_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  result?: ApiValidationResult;
+  error?: string;
+}
+
 export interface ApiSchemaTable {
   name: string;
   schema: string;
@@ -271,11 +290,25 @@ export const attemptsApi = {
       method: 'POST',
       body: JSON.stringify({ query, ...(configId !== undefined ? { config_id: configId } : {}) }),
     }),
+  runQueryAsync: (query: string, configId?: number) =>
+    apiFetch<ApiAsyncJobStart>('/attempts/run_query_async/', {
+      method: 'POST',
+      body: JSON.stringify({ query, ...(configId !== undefined ? { config_id: configId } : {}) }),
+    }),
+  getRunQueryStatus: (jobId: string) =>
+    apiFetch<ApiAsyncQueryJobStatus>(`/attempts/run_query_status/?job_id=${encodeURIComponent(jobId)}`),
   validateQuery: (query: string, questionId: number, configId?: number) =>
     apiFetch<ApiValidationResult>('/attempts/validate_query/', {
       method: 'POST',
       body: JSON.stringify({ query, question_id: questionId, ...(configId !== undefined ? { config_id: configId } : {}) }),
     }),
+  validateQueryAsync: (query: string, questionId: number, configId?: number) =>
+    apiFetch<ApiAsyncJobStart>('/attempts/validate_query_async/', {
+      method: 'POST',
+      body: JSON.stringify({ query, question_id: questionId, ...(configId !== undefined ? { config_id: configId } : {}) }),
+    }),
+  getValidateQueryStatus: (jobId: string) =>
+    apiFetch<ApiAsyncValidationJobStatus>(`/attempts/validate_query_status/?job_id=${encodeURIComponent(jobId)}`),
   submitAnswer: (attemptId: number, questionId: number, query: string) =>
     apiFetch<ApiSubmitResult>(`/attempts/${attemptId}/submit_answer/`, {
       method: 'POST',

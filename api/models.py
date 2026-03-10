@@ -135,6 +135,33 @@ class AttemptAnswer(models.Model):
     execution_time_ms = models.IntegerField(null=True, blank=True)
     error_message = models.TextField(blank=True)
     feedback = models.TextField(blank=True)
+    # Best result tracking - captures the best attempt across all tries
+    best_status = models.CharField(
+        max_length=20, 
+        choices=STATUS_CHOICES, 
+        blank=True, 
+        default='',
+        help_text='Best status achieved across all attempts for this question'
+    )
+    best_query = models.TextField(
+        blank=True, 
+        default='',
+        help_text='Query that achieved the best result'
+    )
+    best_execution_time_ms = models.IntegerField(
+        null=True, 
+        blank=True,
+        help_text='Execution time of the best result in milliseconds'
+    )
+    best_achieved_at = models.DateTimeField(
+        null=True, 
+        blank=True,
+        help_text='Timestamp when the best result was achieved'
+    )
+    attempt_count = models.IntegerField(
+        default=0,
+        help_text='Number of times the participant has attempted this question'
+    )
 
     class Meta:
         db_table = 'attempt_answers'

@@ -104,6 +104,19 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
+# ── Password hashing: fast for local dev, secure for production ───────────────
+# Local dev: MD5PasswordHasher provides instant login (10-100x faster than PBKDF2).
+# Production: PBKDF2 with 600,000+ iterations (Django default) protects against rainbow tables.
+# NEVER use MD5PasswordHasher in production — it exists only for dev convenience.
+if DEBUG:
+    PASSWORD_HASHERS = [
+        'django.contrib.auth.hashers.MD5PasswordHasher',  # Fast (insecure) for dev
+        'django.contrib.auth.hashers.PBKDF2PasswordHasher',  # Fallback for existing passwords
+    ]
+else:
+    # Production uses Django's secure defaults (PBKDF2SHA256PasswordHasher, etc.)
+    pass
+
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
@@ -111,6 +124,26 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# ── Cache ──────────────────────────────────────────────────────────────────────
+# Dev: LocMemCache (single-process, no dependencies).
+# Prod: set REDIS_URL (e.g. redis://localhost:6379/0) to switch to Redis,
+#       which makes rate-limiting and async job state work correctly across
+#       multiple Gunicorn workers.
+_REDIS_URL = os.getenv('REDIS_URL', '').strip()
+if _REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': _REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        }
+    }
 
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [

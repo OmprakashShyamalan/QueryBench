@@ -47,12 +47,14 @@ export const AssessmentEditor: React.FC<Props> = ({ item, targets, questions, on
           <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
             <Clock className="w-3.5 h-3.5" /> Duration (Minutes)
           </label>
-          <input 
-            type="number" 
+          <input
+            type="number"
             name="duration_minutes"
-            value={editingItem.duration_minutes || 60} 
-            onChange={e => setEditingItem({...editingItem, duration_minutes: parseInt(e.target.value)})}
-            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" 
+            value={editingItem.duration_minutes || ''}
+            placeholder="60"
+            min={1}
+            onChange={e => setEditingItem({...editingItem, duration_minutes: parseInt(e.target.value) || 0})}
+            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none"
           />
         </div>
         <div>

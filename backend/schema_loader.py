@@ -53,9 +53,11 @@ def extract_tables_from_sqlserver(sql: str) -> set[str]:
 
     return {t for t in tables if t}
 
+import hashlib
 import pyodbc
 from typing import Dict, List, Any, Optional
-from .config import PRIMARY_CONN
+from django.core.cache import cache
+from .config import PRIMARY_CONN, SCHEMA_CACHE_TTL_SECONDS
 from .db_router import db_router
 
 # SQL Server introspection query - extracts schemas, tables, columns, PKs, FKs
@@ -145,6 +147,23 @@ def _parse_rows(rows, schema_filter: str = '') -> Dict[str, Any]:
     return {"tables": list(tables_map.values())}
 
 
+def _fetch_full_schema(conn_str: Optional[str], schema_filter: str) -> Dict[str, Any]:
+    """Runs _META_QUERY against the DB and parses results. Results are cached by the caller."""
+    conn = None
+    try:
+        if conn_str:
+            conn = pyodbc.connect(conn_str, timeout=5)
+        else:
+            conn = db_router.get_connection(force_primary=True)
+        cursor = conn.cursor()
+        cursor.execute(_META_QUERY)
+        rows = cursor.fetchall()
+        return _parse_rows(rows, schema_filter=schema_filter)
+    finally:
+        if conn:
+            conn.close()
+
+
 def inspect_schema(db_config_id: int = None, conn_str: Optional[str] = None, solution_query: Optional[str] = None, schema_filter: str = '') -> Dict[str, Any]:
     """
     Extracts schema metadata (Tables, Columns, PKs, FKs) from the target database.
@@ -158,45 +177,46 @@ def inspect_schema(db_config_id: int = None, conn_str: Optional[str] = None, sol
 
     If conn_str is provided, connects directly using that string.
     Otherwise falls back to the primary router connection.
+
+    Results are cached for SCHEMA_CACHE_TTL_SECONDS (default 300 s) to avoid
+    re-running the expensive sys.tables introspection query on every panel open.
     """
-    conn = None
-    try:
-        if conn_str:
-            conn = pyodbc.connect(conn_str, timeout=5)
-        else:
-            conn = db_router.get_connection(force_primary=True)
-        cursor = conn.cursor()
-        cursor.execute(_META_QUERY)
-        rows = cursor.fetchall()
-        full_schema = _parse_rows(rows, schema_filter=schema_filter)
+    key_src = (conn_str or 'primary') + '|' + schema_filter.strip().lower()
+    cache_key = 'schema:' + hashlib.md5(key_src.encode()).hexdigest()[:24]
 
-        if solution_query:
-            referenced = extract_tables_from_sqlserver(solution_query)
-            if referenced:
-                # Build lookup sets: both bare names ("orders") and qualified names
-                # ("sales.orders") so either form in a solution query matches correctly.
-                referenced_lower = {t.lower() for t in referenced}
-                filtered_tables = [
-                    t for t in full_schema['tables']
-                    if t['qualifiedName'].lower() in referenced_lower
-                    or t['name'].lower() in referenced_lower
-                ]
-                if filtered_tables:
-                    present_qualified = {t['qualifiedName'].lower() for t in filtered_tables}
-                    present_bare = {t['name'].lower() for t in filtered_tables}
-                    for t in filtered_tables:
-                        t['columns'] = [
-                            col if not (col.get('isForeignKey') and col.get('references'))
-                            or col['references']['qualifiedTable'].lower() in present_qualified
-                            or col['references']['table'].lower() in present_bare
-                            else {k: v for k, v in col.items() if k != 'references'}
-                            for col in t['columns']
-                        ]
-                    return {'tables': filtered_tables}
+    full_schema = cache.get(cache_key) if SCHEMA_CACHE_TTL_SECONDS > 0 else None
+    if full_schema is None:
+        try:
+            full_schema = _fetch_full_schema(conn_str, schema_filter)
+        except Exception as e:
+            return {"error": str(e), "tables": []}
+        if SCHEMA_CACHE_TTL_SECONDS > 0:
+            cache.set(cache_key, full_schema, timeout=SCHEMA_CACHE_TTL_SECONDS)
 
-        return full_schema
-    except Exception as e:
-        return {"error": str(e), "tables": []}
-    finally:
-        if conn:
-            conn.close()
+    if solution_query:
+        referenced = extract_tables_from_sqlserver(solution_query)
+        if referenced:
+            # Build lookup sets: both bare names ("orders") and qualified names
+            # ("sales.orders") so either form in a solution query matches correctly.
+            referenced_lower = {t.lower() for t in referenced}
+            filtered_tables = [
+                t for t in full_schema['tables']
+                if t['qualifiedName'].lower() in referenced_lower
+                or t['name'].lower() in referenced_lower
+            ]
+            if filtered_tables:
+                present_qualified = {t['qualifiedName'].lower() for t in filtered_tables}
+                present_bare = {t['name'].lower() for t in filtered_tables}
+                result_tables = []
+                for t in filtered_tables:
+                    filtered_cols = [
+                        col if not (col.get('isForeignKey') and col.get('references'))
+                        or col['references']['qualifiedTable'].lower() in present_qualified
+                        or col['references']['table'].lower() in present_bare
+                        else {k: v for k, v in col.items() if k != 'references'}
+                        for col in t['columns']
+                    ]
+                    result_tables.append({**t, 'columns': filtered_cols})
+                return {'tables': result_tables}
+
+    return full_schema

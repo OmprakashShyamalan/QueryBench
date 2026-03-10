@@ -1,33 +1,29 @@
 
 import time
 import threading
-from collections import deque
+from django.core.cache import cache
 from .config import RUN_RATE_LIMIT, MAX_CONCURRENT_QUERY_RUNS
 
-# App-wide Concurrency Cap
+# App-wide concurrency cap — intentionally per-process.
+# Each worker process gets its own semaphore of MAX_CONCURRENT_QUERY_RUNS slots.
+# This means total concurrent DB queries across N workers = N * MAX_CONCURRENT_QUERY_RUNS.
+# Reduce MAX_CONCURRENT_QUERY_RUNS proportionally when running multiple workers
+# (e.g. 4 workers → set MAX_CONCURRENT_QUERY_RUNS=5 for the same ~20 total cap).
 query_semaphore = threading.Semaphore(MAX_CONCURRENT_QUERY_RUNS)
 
-# Per-user Rate Limiter (In-memory for MVP, use Redis for multi-worker prod)
-user_rate_limits = {}
-rate_limit_lock = threading.Lock()
 
 def check_rate_limit(user_id: str) -> bool:
     """
-    Returns True if user is within the rate limit (e.g. 10 runs / min).
+    Returns True if the user is within the rate limit (RUN_RATE_LIMIT runs/min).
+
+    Uses a fixed 1-minute window keyed by (user_id, current minute bucket).
+    State is stored in Django's cache, so it works correctly across multiple
+    Gunicorn workers when the cache backend is Redis.
     """
-    now = time.time()
-    with rate_limit_lock:
-        if user_id not in user_rate_limits:
-            user_rate_limits[user_id] = deque()
-        
-        user_queue = user_rate_limits[user_id]
-        
-        # Cleanup old entries
-        while user_queue and user_queue[0] < now - 60:
-            user_queue.popleft()
-        
-        if len(user_queue) >= RUN_RATE_LIMIT:
-            return False
-            
-        user_queue.append(now)
-        return True
+    bucket = int(time.time() // 60)
+    key = f"rl:{user_id}:{bucket}"
+    # cache.add is atomic: sets key to 0 only if it doesn't already exist.
+    # cache.incr then atomically increments and returns the new count.
+    cache.add(key, 0, timeout=120)  # 2-minute TTL covers the current and prior bucket
+    count = cache.incr(key)
+    return count <= RUN_RATE_LIMIT

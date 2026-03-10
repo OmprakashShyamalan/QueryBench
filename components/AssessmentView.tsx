@@ -8,9 +8,51 @@ import {
 import CodeMirror from '@uiw/react-codemirror';
 import { sql } from '@codemirror/lang-sql';
 import { autocompletion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
+import { EditorView } from '@codemirror/view';
 import SchemaVisualizer from './SchemaVisualizer';
 import { assessmentsApi, attemptsApi, schemaApi, assignmentsApi, ApiAttempt, ApiAssessmentFull, ApiSubmitResult, ApiQuestion, ApiValidationResult } from '../services/api';
 import { AssessmentHeader } from './AssessmentView/AssessmentHeader';
+
+const JOB_POLL_INTERVAL_MS = 700;
+const JOB_POLL_TIMEOUT_MS = 120000;
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function waitForRunQueryJob(jobId: string) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < JOB_POLL_TIMEOUT_MS) {
+    const job = await attemptsApi.getRunQueryStatus(jobId);
+    if (job.status === 'completed') {
+      if (!job.result) {
+        throw new Error('Query job completed without a result payload.');
+      }
+      return job.result;
+    }
+    if (job.status === 'failed') {
+      throw new Error(job.error || 'Query execution job failed.');
+    }
+    await sleep(JOB_POLL_INTERVAL_MS);
+  }
+  throw new Error('Query execution timed out while waiting for backend completion.');
+}
+
+async function waitForValidateQueryJob(jobId: string) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < JOB_POLL_TIMEOUT_MS) {
+    const job = await attemptsApi.getValidateQueryStatus(jobId);
+    if (job.status === 'completed') {
+      if (!job.result) {
+        throw new Error('Validation job completed without a result payload.');
+      }
+      return job.result;
+    }
+    if (job.status === 'failed') {
+      throw new Error(job.error || 'Query validation job failed.');
+    }
+    await sleep(JOB_POLL_INTERVAL_MS);
+  }
+  throw new Error('Query validation timed out while waiting for backend completion.');
+}
 
 interface Props {
   assessmentId: string;
@@ -159,14 +201,16 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
     setResult(null);
     setValidationResult(null);
     try {
-      const resultData = await attemptsApi.runQuery(query, assessment.db_config);
+      const runJob = await attemptsApi.runQueryAsync(query, assessment.db_config);
+      const resultData = await waitForRunQueryJob(runJob.job_id);
       setResult(resultData);
 
       // Validate the query against expected solution
       if (!resultData.error) {
         setIsValidating(true);
         try {
-          const validation = await attemptsApi.validateQuery(query, currentQuestion.id, assessment.db_config);
+          const validateJob = await attemptsApi.validateQueryAsync(query, currentQuestion.id, assessment.db_config);
+          const validation = await waitForValidateQueryJob(validateJob.job_id);
           setValidationResult(validation);
         } catch (err) {
           // If validation fails, don't break the UI - just log it
@@ -555,6 +599,7 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
               theme="dark" 
               extensions={[
                 sql(), 
+                EditorView.lineWrapping,
                 autocompletion({ 
                   override: [sqlAutocomplete],
                   maxRenderedOptions: 100,

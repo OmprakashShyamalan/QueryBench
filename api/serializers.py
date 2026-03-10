@@ -2,6 +2,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from .models import DatabaseConfig, Question, Assessment, Assignment, Attempt, AttemptAnswer
+from backend.crypto import encrypt_field
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -11,6 +12,28 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class DatabaseConfigSerializer(serializers.ModelSerializer):
+    # Accept a plain-text password on write; never return it in responses.
+    password_secret_ref = serializers.CharField(
+        write_only=True, required=False, allow_blank=True, default='',
+    )
+
+    def _encrypt_password(self, validated_data: dict) -> dict:
+        raw = validated_data.get('password_secret_ref', '')
+        if raw:
+            validated_data['password_secret_ref'] = encrypt_field(raw)
+        return validated_data
+
+    def create(self, validated_data):
+        return super().create(self._encrypt_password(validated_data))
+
+    def update(self, instance, validated_data):
+        # If password field is absent or blank on update, keep the existing stored value.
+        if not validated_data.get('password_secret_ref'):
+            validated_data.pop('password_secret_ref', None)
+        else:
+            self._encrypt_password(validated_data)
+        return super().update(instance, validated_data)
+
     class Meta:
         model = DatabaseConfig
         fields = '__all__'

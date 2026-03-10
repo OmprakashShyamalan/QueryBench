@@ -4,7 +4,33 @@ import { ShieldCheck, Code, AlignLeft, RefreshCw, AlertCircle, CheckCircle, Play
 import { Question, DatabaseConfig } from '../../types';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql } from '@codemirror/lang-sql';
+import { EditorView } from '@codemirror/view';
 import { attemptsApi } from '../../services/api';
+
+const JOB_POLL_INTERVAL_MS = 700;
+const JOB_POLL_TIMEOUT_MS = 120000;
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function waitForRunQueryJob(jobId: string) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < JOB_POLL_TIMEOUT_MS) {
+    const job = await attemptsApi.getRunQueryStatus(jobId);
+    if (job.status === 'completed') {
+      if (!job.result) {
+        throw new Error('Query job completed without a result payload.');
+      }
+      return job.result;
+    }
+    if (job.status === 'failed') {
+      throw new Error(job.error || 'Query execution job failed.');
+    }
+    await sleep(JOB_POLL_INTERVAL_MS);
+  }
+
+  throw new Error('Query execution timed out while waiting for backend completion.');
+}
 
 interface Props {
   item: any;
@@ -61,9 +87,11 @@ export const QuestionEditor: React.FC<Props> = ({ item, targets, onSave, onCance
       return;
     }
 
-    // Actually execute the query against the selected database
+    // Execute the query asynchronously in backend and poll for completion.
+    // Keeps UI responsive and avoids long in-flight HTTP timeouts.
     try {
-      const result = await attemptsApi.runQuery(query, configId);
+      const job = await attemptsApi.runQueryAsync(query, configId);
+      const result = await waitForRunQueryJob(job.job_id);
       if (result.error) {
         setStatus({ type: 'error', msg: `Database Error: ${result.error}` });
       } else {
@@ -175,7 +203,7 @@ export const QuestionEditor: React.FC<Props> = ({ item, targets, onSave, onCance
               value={editingItem.solution_query || ''} 
               theme="dark"
               height="100%"
-              extensions={[sql()]}
+              extensions={[sql(), EditorView.lineWrapping]}
               onChange={value => { solutionQueryRef.current = value; setEditingItem({...editingItem, solution_query: value}); }}
               className="h-full text-sm font-mono"
             />

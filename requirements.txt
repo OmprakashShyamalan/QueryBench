@@ -2,11 +2,14 @@ Django>=5.2,<6.0
 djangorestframework>=3.16
 django-cors-headers>=4.9
 mssql-django>=1.6
-django-csp>=3.8
-pyodbc>=5.0
+django-csp>=4.0
+pyodbc>=5.3
 python-dotenv>=1.2
 sqlparse>=0.5
-gunicorn>=25.0
+gunicorn>=25.1
+redis>=7.3           # required for Django's built-in Redis cache backend (production)
+cryptography>=46.0   # used by backend/crypto.py for Fernet encryption of sensitive fields
+locust>=2.43         # used by locustfile.py for load testing
 
 # Enterprise SSO — uncomment and install when QB_USE_SSO=true and Entra ID details are ready.
 # mozilla-django-oidc>=4.0
