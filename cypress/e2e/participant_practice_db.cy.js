@@ -3,13 +3,11 @@
 // Reads participant credentials and assessment details from
 // cypress/fixtures/e2e_session_training.json.
 //
-// Scenario coverage across 5 questions:
+// Scenario coverage across 10 questions:
 //   Q1 — Wrong syntax      : SELCT typo (SQL_STORE.customers)   → "Query Execution Failed"
 //   Q2 — Correct syntax,   : Missing Phone column (shippers)    → "Result Mismatch"
 //        wrong projection
-//   Q3 — Correct answer    : Products per category              → "Query Correct!"
-//   Q4 — Correct answer    : Movies by MPAA rating              → "Query Correct!"
-//   Q5 — Correct answer    : Top 5 movies by WW box office      → "Query Correct!"
+//   Q3..Q10 — Correct answer queries from fixture                → "Query Correct!"
 // Final: Finish → Confirm → "Assessment Submitted"
 // Epilogue: Admin logs in and verifies the result row appears.
 
@@ -55,6 +53,7 @@ describe('Participant Flow E2E — SQL Training', () => {
 
   it('2. Participant Opens Assigned Assessment', function () {
     if (!questions || !questions.length) return this.skip();
+    expect(questions.length, 'Training assessment should contain 10 questions').to.equal(10);
     // Wait up to 10 s for the Begin button — the dashboard may still be fetching assignments
     cy.contains('button', 'Begin', { timeout: 10000 }).click();
     // Verify first question prompt is visible — assessment loaded successfully
@@ -140,60 +139,26 @@ describe('Participant Flow E2E — SQL Training', () => {
     cy.contains('Result Mismatch', { timeout: 15000 }).should('be.visible');
   });
 
-  // ─── Q3: Correct Answer ──────────────────────────────────────────────────
+  // ─── Q3..Q10: Correct Answers ──────────────────────────────────────────────
 
-  it('7. Q3 — Correct Answer (products per category)', function () {
+  it('7. Q3..Q10 — Correct Answers from Fixture', function () {
     if (!questions[2]) return this.skip();
 
-    cy.contains('button', /^3$/).click();
-    cy.contains(questions[2].prompt, { timeout: 5000 }).should('be.visible');
+    for (let i = 2; i < questions.length; i += 1) {
+      const questionNumber = i + 1;
+      cy.contains('button', new RegExp(`^${questionNumber}$`)).click();
+      cy.contains(questions[i].prompt, { timeout: 5000 }).should('be.visible');
 
-    typeQuery(questions[2].query);
-
-    cy.contains('button', 'Run Query').click();
-
-    cy.wait(1000);
-
-    cy.contains('Query Correct', { timeout: 15000 }).should('be.visible');
-  });
-
-  // ─── Q4: Correct Answer ───────────────────────────────────────────────────
-
-  it('8. Q4 — Correct Answer (movies by MPAA rating)', function () {
-    if (!questions[3]) return this.skip();
-
-    cy.contains('button', /^4$/).click();
-    cy.contains(questions[3].prompt, { timeout: 5000 }).should('be.visible');
-
-    typeQuery(questions[3].query);
-
-    cy.contains('button', 'Run Query').click();
-
-    cy.wait(1000);
-
-    cy.contains('Query Correct', { timeout: 15000 }).should('be.visible');
-  });
-
-  // ─── Q5: Correct Answer ───────────────────────────────────────────────────
-
-  it('9. Q5 — Correct Answer (top 5 movies by worldwide box office)', function () {
-    if (!questions[4]) return this.skip();
-
-    cy.contains('button', new RegExp('^' + questions.length + '$')).click();
-    cy.contains(questions[4].prompt, { timeout: 5000 }).should('be.visible');
-
-    typeQuery(questions[4].query);
-
-    cy.contains('button', 'Run Query').click();
-
-    cy.wait(1000);
-
-    cy.contains('Query Correct', { timeout: 15000 }).should('be.visible');
+      typeQuery(questions[i].query);
+      cy.contains('button', 'Run Query').click();
+      cy.wait(1000);
+      cy.contains('Query Correct', { timeout: 15000 }).should('be.visible');
+    }
   });
 
   // ─── Submit Assessment ───────────────────────────────────────────────────
 
-  it('10. Participant Submits Assessment', () => {
+  it('8. Participant Submits Assessment', () => {
     // Click Finish to open the confirmation modal
     cy.contains('button', 'Finish').click();
 
@@ -209,7 +174,7 @@ describe('Participant Flow E2E — SQL Training', () => {
 
   // ─── Admin Verifies Results ───────────────────────────────────────────────
 
-  it('11. Admin Verifies Results', () => {
+  it('9. Admin Verifies Results', () => {
     cy.clearCookies();
     cy.visit('/login');
     cy.get('input[name="username"]').type(admin.username);

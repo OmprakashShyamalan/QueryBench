@@ -7,7 +7,7 @@
 //     Products per Category, Orders in 1996, Top 5 Customers by Order Volume)
 //   • 5 questions from SQL_MOVIE schema  (Movies by MPAA Rating, Distributor List,
 //     Top 5 Movies by WW Box Office, MCU Phase 1 Movies, Avg Box Office by Distributor)
-//   • 1 assessment with 5 curated questions (mixing both schemas)
+//   • 1 assessment with all 10 questions (mixing both schemas)
 //   • 1 assignment to the freshly-created participant
 //
 // Session data is written to cypress/fixtures/e2e_session_training.json
@@ -16,9 +16,7 @@
 // Assessment question order (drives participant test scenarios):
 //   AQ1 — Customer Countries    (sql_store) → wrong-syntax test
 //   AQ2 — Shipper Directory     (sql_store) → wrong-projection test (omit Phone)
-//   AQ3 — Products per Category (sql_store) → correct answer
-//   AQ4 — Movies by MPAA Rating (sql_movie) → correct answer
-//   AQ5 — Top 5 Movies WW BO   (sql_movie) → correct answer
+//   AQ3..AQ10                   (mixed)     → correct answers
 
 describe('Admin Setup E2E — SQL Training', () => {
   const admin = { username: 'admin', password: 'admin123' };
@@ -130,15 +128,8 @@ describe('Admin Setup E2E — SQL Training', () => {
   // All 10 questions to create in the question bank
   const allQuestions = [...storeQuestions, ...movieQuestions];
 
-  // The 5 questions that will form the assessment (in participant test order).
-  // These titles must match entries in allQuestions for the fixture to be correct.
-  const assessmentQuestionTitles = [
-    'Customer Countries',          // AQ1 — wrong-syntax scenario
-    'Shipper Directory',           // AQ2 — wrong-projection scenario
-    'Products per Category',       // AQ3 — correct answer
-    'Movies by MPAA Rating',       // AQ4 — correct answer
-    'Top 5 Movies by Worldwide Box Office', // AQ5 — correct answer
-  ];
+  // All 10 questions will be used in the assessment, preserving authoring order.
+  const assessmentQuestionTitles = allQuestions.map((q) => q.title);
 
   const assessmentName = 'E2E Training Assessment ' + ts;
   const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -152,7 +143,7 @@ describe('Admin Setup E2E — SQL Training', () => {
     cy.writeFile('cypress/fixtures/e2e_session_training.json', {
       participant,
       assessmentName,
-      questions: allQuestions.filter((q) => assessmentQuestionTitles.includes(q.title)),
+      questions: allQuestions,
     });
   });
 
@@ -260,13 +251,13 @@ describe('Admin Setup E2E — SQL Training', () => {
     cy.then(() => {
       expect(
         createdTitles.length,
-        `0 of ${allQuestions.length} questions passed validation — cannot create an assessment`,
-      ).to.be.greaterThan(0);
+        `Expected all ${allQuestions.length} questions to pass validation for 10-question training assessment`,
+      ).to.equal(allQuestions.length);
       cy.log(`✓ ${createdTitles.length}/${allQuestions.length} questions created successfully`);
     });
   });
 
-  // ─── 5. Create assessment with 5 curated questions ────────────────────────
+  // ─── 5. Create assessment with all 10 questions ───────────────────────────
 
   it('5. Admin Creates Assessment', function () {
     const available = allQuestions.filter(

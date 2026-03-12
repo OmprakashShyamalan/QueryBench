@@ -1,8 +1,8 @@
 # Run Cypress E2E tests in a clean environment
 # Usage:
-#   .\run_cypress_clean.ps1              — run all specs (admin_e2e then participant_e2e)
-#   .\run_cypress_clean.ps1 admin        — run admin_e2e only
-#   .\run_cypress_clean.ps1 participant  — run participant_e2e only
+#   .\run_cypress_clean.ps1              — run all local specs (admin_local then participant_local)
+#   .\run_cypress_clean.ps1 admin        — run admin_local only
+#   .\run_cypress_clean.ps1 participant  — run participant_local only
 
 Set-Location 'C:\Code\QueryBench'
 
@@ -16,8 +16,8 @@ $env:CYPRESS_CACHE_FOLDER = 'C:\Users\Omprakash.g\AppData\Local\Cypress\Cache'
 
 # Resolve spec from optional argument
 $specArg = switch ($args[0]) {
-    'admin'       { "--spec 'cypress/e2e/admin_e2e.cy.js'" }
-    'participant' { "--spec 'cypress/e2e/participant_e2e.cy.js'" }
+    'admin'       { "--spec 'cypress/e2e/admin_local.cy.js'" }
+    'participant' { "--spec 'cypress/e2e/participant_local.cy.js'" }
     default       { '' }
 }
 
@@ -30,13 +30,13 @@ if ($specArg) {
     $exitCode = $LASTEXITCODE
 } else {
     # Run admin first so e2e_session.json is written before participant reads it
-    & node 'node_modules\cypress\bin\cypress' run --spec 'cypress/e2e/admin_e2e.cy.js'
+    & node 'node_modules\cypress\bin\cypress' run --spec 'cypress/e2e/admin_local.cy.js'
     $exitCode = $LASTEXITCODE
     if ($exitCode -eq 0) {
-        & node 'node_modules\cypress\bin\cypress' run --spec 'cypress/e2e/participant_e2e.cy.js'
+        & node 'node_modules\cypress\bin\cypress' run --spec 'cypress/e2e/participant_local.cy.js'
         $exitCode = $LASTEXITCODE
     } else {
-        Write-Host "admin_e2e failed — skipping participant_e2e."
+        Write-Host "admin_local failed — skipping participant_local."
     }
 }
 
