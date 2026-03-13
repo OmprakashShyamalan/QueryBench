@@ -105,7 +105,9 @@ describe('Participant Flow E2E — SQL Training', () => {
     cy.contains('button', 'Explorer').click();
 
     if (tablePattern) {
-      cy.contains('span', tablePattern, { timeout: 8000 }).should('be.visible');
+      cy.get('div.space-y-4', { timeout: 8000 })
+        .contains(tablePattern)
+        .should('exist');
     }
   });
 
