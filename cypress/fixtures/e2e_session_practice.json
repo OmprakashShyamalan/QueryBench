@@ -1,0 +1,70 @@
+{
+  "participant": {
+    "username": "e2e_train_1773348412917",
+    "password": "password123",
+    "email": "e2e_train_1773348412917@example.com"
+  },
+  "assessmentName": "E2E Training Assessment 1773348412917",
+  "questions": [
+    {
+      "title": "Customer Countries",
+      "prompt": "List each distinct country that has at least one customer. Sort the results alphabetically by country name.",
+      "query": "SELECT DISTINCT Country FROM SQL_STORE.customers ORDER BY Country;",
+      "difficulty": "EASY"
+    },
+    {
+      "title": "Shipper Directory",
+      "prompt": "Retrieve the name and phone number of every shipper. Order results by shipper name.",
+      "query": "SELECT ShipperName, Phone FROM SQL_STORE.shippers ORDER BY ShipperName;",
+      "difficulty": "EASY"
+    },
+    {
+      "title": "Products per Category",
+      "prompt": "For each category, return the category name and the number of products it contains (label the count ProductCount). Order by category name ascending.",
+      "query": "SELECT c.CategoryName, COUNT(p.ProductID) AS ProductCount FROM SQL_STORE.Categories c JOIN SQL_STORE.products p ON c.CategoryID = p.CategoryID GROUP BY c.CategoryName ORDER BY c.CategoryName;",
+      "difficulty": "MEDIUM"
+    },
+    {
+      "title": "Orders in 1996",
+      "prompt": "List all orders placed during 1996, showing OrderID, CustomerID, and OrderDate. Sort by OrderDate ascending.",
+      "query": "SELECT OrderID, CustomerID, OrderDate FROM SQL_STORE.orders WHERE YEAR(OrderDate) = 1996 ORDER BY OrderDate;",
+      "difficulty": "MEDIUM"
+    },
+    {
+      "title": "Top 5 Customers by Order Volume",
+      "prompt": "Find the top 5 customers who have placed the most orders. Show their CustomerName and order count (labelled OrderCount), highest first.",
+      "query": "SELECT TOP 5 c.CustomerName, COUNT(o.OrderID) AS OrderCount FROM SQL_STORE.customers c JOIN SQL_STORE.orders o ON c.CustomerID = o.CustomerID GROUP BY c.CustomerName ORDER BY OrderCount DESC;",
+      "difficulty": "HARD"
+    },
+    {
+      "title": "Movies by MPAA Rating",
+      "prompt": "For each MPAA rating, return the MPAA_Rating_ID and the count of movies with that rating (label the count MovieCount). Order by MPAA_Rating_ID.",
+      "query": "SELECT MPAA_Rating_ID, COUNT(*) AS MovieCount FROM SQL_MOVIE.Movie GROUP BY MPAA_Rating_ID ORDER BY MPAA_Rating_ID;",
+      "difficulty": "EASY"
+    },
+    {
+      "title": "Distributor List",
+      "prompt": "List all movie distributors ordered alphabetically by their name.",
+      "query": "SELECT Distributor_Name FROM SQL_MOVIE.Distributor ORDER BY Distributor_Name;",
+      "difficulty": "EASY"
+    },
+    {
+      "title": "Top 5 Movies by Worldwide Box Office",
+      "prompt": "Show the title and worldwide box office gross of the top 5 highest-grossing movies, sorted from highest to lowest.",
+      "query": "SELECT TOP 5 Title, Box_Office_WorldWide FROM SQL_MOVIE.Movie ORDER BY Box_Office_WorldWide DESC;",
+      "difficulty": "MEDIUM"
+    },
+    {
+      "title": "MCU Phase 1 Movies with Character Family",
+      "prompt": "List each MCU Phase 1 movie with its title and character family name. Sort results by release date ascending.",
+      "query": "SELECT m.Title, cf.Character_Family_Name FROM SQL_MOVIE.Movie m JOIN SQL_MOVIE.Character_Family cf ON m.Character_Family_ID = cf.Character_Family_ID WHERE m.MCU_Phase = 1 ORDER BY m.Release_Date;",
+      "difficulty": "MEDIUM"
+    },
+    {
+      "title": "Average Box Office by Distributor",
+      "prompt": "For each distributor, calculate the average worldwide box office revenue across their movies (label it AvgBoxOffice). Order from highest to lowest average.",
+      "query": "SELECT d.Distributor_Name, AVG(m.Box_Office_WorldWide) AS AvgBoxOffice FROM SQL_MOVIE.Distributor d JOIN SQL_MOVIE.Movie m ON d.Distributor_ID = m.Distributor_ID GROUP BY d.Distributor_Name ORDER BY AvgBoxOffice DESC;",
+      "difficulty": "HARD"
+    }
+  ]
+}

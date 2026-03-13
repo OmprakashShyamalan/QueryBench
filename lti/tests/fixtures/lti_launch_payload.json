@@ -1,0 +1,28 @@
+{
+  "iss": "https://moodle.local",
+  "aud": "querybench-client",
+  "sub": "lms-user-42",
+  "email": "student@example.com",
+  "name": "Sample Student",
+  "iat": 1700000000,
+  "exp": 1700000300,
+  "nonce": "sample-nonce-123",
+  "https://purl.imsglobal.org/spec/lti/claim/deployment_id": "deployment-1",
+  "https://purl.imsglobal.org/spec/lti/claim/context": {
+    "id": "course-100"
+  },
+  "https://purl.imsglobal.org/spec/lti/claim/resource_link": {
+    "id": "assignment-200"
+  },
+  "https://purl.imsglobal.org/spec/lti/claim/roles": [
+    "http://purl.imsglobal.org/vocab/lis/v2/membership#Learner"
+  ],
+  "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint": {
+    "lineitems": "https://moodle.local/mod/lti/services.php/lineitems",
+    "lineitem": "https://moodle.local/mod/lti/services.php/lineitems/10",
+    "scope": [
+      "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem",
+      "https://purl.imsglobal.org/spec/lti-ags/scope/score"
+    ]
+  }
+}

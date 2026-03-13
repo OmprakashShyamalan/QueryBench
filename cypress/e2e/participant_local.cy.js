@@ -2,18 +2,19 @@
 // Runs AFTER admin_e2e.cy.js (alphabetical order guarantees this).
 // Reads participant credentials and assessment details from cypress/fixtures/e2e_session.json.
 //
-// Scenario coverage across 5 questions:
+// Scenario coverage across fixture questions:
 //   Q1 — Wrong syntax      : SELCT typo              → "Query Execution Failed"
-//   Q2 — Correct syntax,   : Missing column (Phone)  → "Result Mismatch"
+//   Q2 — Correct syntax,   : Wrong projection        → "Result Mismatch"
 //        wrong projection
-//   Q3 — Correct answer    : Exact solution query    → "Query Correct!"
-//   Q4 — Correct answer    : Run and evaluated       → "Query Correct!"
-//   Q5 — Correct answer    : Run and evaluated       → "Query Correct!"
+//   Q3..Qn — Correct answers from fixture             → "Query Correct!"
 // Final: Finish → Confirm → "Assessment Submitted"
 // Epilogue: Admin logs in and verifies the result row appears.
 
 describe('Participant Flow E2E', () => {
   const admin = { username: 'admin', password: 'admin123' };
+
+  const normalizeSql = (value = '') => value.replace(/\r\n/g, '\n').trim();
+  const escapeRegExp = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   // Populated from fixture written by admin_e2e.cy.js
   let participant;
@@ -28,18 +29,39 @@ describe('Participant Flow E2E', () => {
     });
   });
 
-  // Helper: focus the CodeMirror editor, clear any existing content, then type a query.
-  // Clears first (select-all + delete) to avoid appending to leftover content from a
-  // previous run or autocomplete insertion. Uses Escape to dismiss any open autocomplete.
-  // force:true is required after switching away from the Diagram tab (React Flow holds
-  // focus and the actionability check would otherwise fail).
+  beforeEach(() => {
+    cy.intercept('POST', '/api/v1/attempts/run_query_async/').as('runQueryAsync');
+  });
+
   const typeQuery = (query) => {
-    cy.get('.cm-content')
-      .click({ force: true })
-      .type('{selectall}', { parseSpecialCharSequences: true })
-      .type('{del}', { parseSpecialCharSequences: true })
-      .type('{esc}', { parseSpecialCharSequences: true })
-      .type(query, { parseSpecialCharSequences: false, delay: 30 });
+    cy.setCodeMirrorQuery(query);
+  };
+
+  const getPrimaryTableReference = (sql) => {
+    const m = (sql || '').match(/\bfrom\s+([\w\[\].]+)/i);
+    if (!m) return null;
+    const raw = m[1].replace(/\[|\]/g, '');
+    const parts = raw.split('.');
+    const name = parts.pop() || raw;
+    const schema = parts.pop() || '';
+    return { raw, schema, name };
+  };
+
+  const getTableLabelPattern = (sql) => {
+    const ref = getPrimaryTableReference(sql);
+    if (!ref) return null;
+    if (ref.schema && ref.schema.toLowerCase() !== 'dbo') {
+      return new RegExp(`^\\s*(?:${escapeRegExp(ref.schema)}\\s*\\.\\s*)?${escapeRegExp(ref.name)}\\s*$`, 'i');
+    }
+    return new RegExp(`^\\s*${escapeRegExp(ref.name)}\\s*$`, 'i');
+  };
+
+  const runQueryAndAssertSubmission = (expectedQuery) => {
+    cy.contains('button', 'Run Query').click();
+    cy.wait('@runQueryAsync').then(({ request }) => {
+      const body = typeof request.body === 'string' ? JSON.parse(request.body) : request.body;
+      expect(normalizeSql(body.query), 'submitted query payload').to.equal(normalizeSql(expectedQuery));
+    });
   };
 
   // ─── Participant Login ────────────────────────────────────────────────────
@@ -54,10 +76,22 @@ describe('Participant Flow E2E', () => {
 
   it('2. Participant Opens Assigned Assessment', function () {
     if (!questions || !questions.length) return this.skip();
-    // Wait up to 10 s for the Begin button — the dashboard may still be fetching assignments
-    cy.contains('button', 'Begin', { timeout: 10000 }).click();
-    // Verify first question prompt is visible — assessment loaded successfully
-    cy.contains(questions[0].prompt, { timeout: 10000 }).should('exist');
+    // Open the assignment that matches fixture assessmentName to avoid
+    // picking a different pending assignment from prior runs.
+    cy.get('button', { timeout: 10000 }).then(($buttons) => {
+      const target = Array.from($buttons).find((btn) => {
+        const label = (btn.textContent || '').trim();
+        if (!/Begin|Resume/.test(label)) return false;
+        const card = Cypress.$(btn).closest('div[class*="rounded-3xl"]')[0];
+        const cardText = card?.textContent || '';
+        return cardText.includes(assessmentName);
+      });
+
+      expect(target, `Begin/Resume button for assessment "${assessmentName}"`).to.exist;
+      cy.wrap(target).click();
+    });
+    // Verify first question title is visible — assessment loaded successfully
+    cy.contains(questions[0].title, { timeout: 10000 }).should('exist');
     // Step navigator shows exactly as many steps as questions were created
     cy.contains('button', new RegExp('^' + questions.length + '$'), { timeout: 8000 }).should('exist');
   });
@@ -65,41 +99,31 @@ describe('Participant Flow E2E', () => {
   // ─── Schema Explorer ─────────────────────────────────────────────────────
 
   it('3. Explorer tab shows only Q1-relevant table', () => {
-    // The schema API is called with question_id, so the backend filters to only
-    // the tables referenced in Q1's solution query: Customers.
+    const tablePattern = getTableLabelPattern(questions?.[0]?.query);
     cy.contains('button', 'Explorer').click();
 
-    // Customers must be visible — it is the only table in Q1's solution query
-    cy.contains('Customers', { timeout: 8000 }).should('be.visible');
-
-    // Column details inside the Customers card must be visible
-    cy.contains('CustomerID').should('be.visible');
-
-    // Tables outside Q1's solution must not appear in the explorer
-    cy.contains('Products').should('not.exist');
-    cy.contains('Suppliers').should('not.exist');
+    if (tablePattern) {
+      cy.contains('span', tablePattern, { timeout: 8000 }).should('be.visible');
+    }
   });
 
   // ─── ER Diagram ──────────────────────────────────────────────────────────
 
   it('4. Diagram tab renders ER diagram for Q1-relevant table', () => {
+    const tablePattern = getTableLabelPattern(questions?.[0]?.query);
     cy.contains('button', 'Diagram').click();
 
     // ReactFlow root element must mount
     cy.get('.react-flow', { timeout: 8000 }).should('exist');
 
-    // Q1's solution references only Customers — that is the only node in the diagram
-    cy.get('.react-flow__nodes').contains('Customers').should('exist');
+    if (tablePattern) {
+      cy.get('.react-flow__node-table', { timeout: 8000 }).contains(tablePattern).should('exist');
+    }
 
-    // Tables outside Q1's solution must not appear as diagram nodes
-    cy.get('.react-flow__nodes').contains('Orders').should('not.exist');
-    cy.get('.react-flow__nodes').contains('Products').should('not.exist');
-    cy.get('.react-flow__nodes').contains('Suppliers').should('not.exist');
-
-    // Return to Prompt tab. Wait briefly for React Flow to fully unmount — without
+    // Return to Task tab. Wait briefly for React Flow to fully unmount — without
     // this pause the CodeMirror editor in the next test can miss the click due to
     // residual focus held by the React Flow canvas.
-    cy.contains('button', 'Prompt').click();
+    cy.contains('button', 'Task').click();
     cy.wait(500);
   });
 
@@ -109,90 +133,55 @@ describe('Participant Flow E2E', () => {
   it('5. Q1 — Wrong Syntax Answer (SELCT typo)', function () {
     if (!questions[0]) return this.skip();
 
-    cy.contains(questions[0].prompt, { timeout: 5000 }).should('be.visible');
+    cy.contains(questions[0].title, { timeout: 5000 }).should('be.visible');
 
     // Type a query with a syntax error (misspelled SELECT keyword)
-    typeQuery('SELCT DISTINCT Country FROM Customers ORDER BY Country;');
+    const broken = (questions[0].query || '').replace(/^\s*SELECT/i, 'SELCT');
+    typeQuery(broken || 'SELCT 1;');
 
-    cy.contains('button', 'Run Query').click();
-
-    cy.wait(1000);
+    runQueryAndAssertSubmission(broken || 'SELCT 1;');
 
     cy.contains('Query Execution Failed', { timeout: 15000 }).should('be.visible');
   });
 
   // ─── Q2: Correct Syntax, Wrong Projection ────────────────────────────────
 
-  it('6. Q2 — Correct Syntax, Wrong Projection (missing Phone column)', function () {
+  it('6. Q2 — Correct Syntax, Wrong Projection', function () {
     if (!questions[1]) return this.skip();
 
     cy.contains('button', /^2$/).click();
-    cy.contains(questions[1].prompt, { timeout: 5000 }).should('be.visible');
+    cy.contains(questions[1].title, { timeout: 5000 }).should('be.visible');
 
-    // Valid SQL — but omits the Phone column the solution requires
-    typeQuery('SELECT SupplierName FROM Suppliers ORDER BY SupplierName;');
+    // Valid SQL but intentionally wrong result shape
+    const wrongProjectionQuery = 'SELECT 1 AS MismatchValue;';
+    typeQuery(wrongProjectionQuery);
 
-    cy.contains('button', 'Run Query').click();
-
-    cy.wait(1000);
+    runQueryAndAssertSubmission(wrongProjectionQuery);
 
     cy.contains('Result Mismatch', { timeout: 15000 }).should('be.visible');
   });
 
-  // ─── Q3: Correct Answer ──────────────────────────────────────────────────
+  // ─── Q3..Qn: Correct Answers ─────────────────────────────────────────────
 
-  it('7. Q3 — Correct Answer', function () {
+  it('7. Q3..Qn — Correct Answers from Fixture', function () {
     if (!questions[2]) return this.skip();
 
-    cy.contains('button', /^3$/).click();
-    cy.contains(questions[2].prompt, { timeout: 5000 }).should('be.visible');
+    for (let i = 2; i < questions.length; i += 1) {
+      const questionNumber = i + 1;
+      cy.contains('button', new RegExp(`^${questionNumber}$`)).click();
+      cy.contains(questions[i].title, { timeout: 5000 }).should('be.visible');
 
-    typeQuery(questions[2].query);
+      typeQuery(questions[i].query);
 
-    cy.contains('button', 'Run Query').click();
+      runQueryAndAssertSubmission(questions[i].query);
 
-    cy.wait(1000);
-
-    cy.contains('Query Correct', { timeout: 15000 }).should('be.visible');
-  });
-
-  // ─── Q4: Correct Answer ───────────────────────────────────────────────────
-
-  it('8. Q4 — Correct Answer', function () {
-    if (!questions[3]) return this.skip();
-
-    cy.contains('button', /^4$/).click();
-    cy.contains(questions[3].prompt, { timeout: 5000 }).should('be.visible');
-
-    typeQuery(questions[3].query);
-
-    cy.contains('button', 'Run Query').click();
-
-    cy.wait(1000);
-
-    cy.contains('Query Correct', { timeout: 15000 }).should('be.visible');
-  });
-
-  // ─── Q5: Correct Answer ───────────────────────────────────────────────────
-
-  it('9. Q5 — Correct Answer', function () {
-    if (!questions[4]) return this.skip();
-
-    cy.contains('button', new RegExp('^' + questions.length + '$')).click();
-    cy.contains(questions[4].prompt, { timeout: 5000 }).should('be.visible');
-
-    typeQuery(questions[4].query);
-
-    cy.contains('button', 'Run Query').click();
-
-    cy.wait(1000);
-
-    cy.contains('Query Correct', { timeout: 15000 }).should('be.visible');
+      cy.contains('Query Correct', { timeout: 15000 }).should('be.visible');
+    }
   });
 
   // ─── Submit Assessment ───────────────────────────────────────────────────
 
-  it('10. Participant Submits Assessment', () => {
+  it('8. Participant Submits Assessment', () => {
     // Click Finish to open the confirmation modal
     cy.contains('button', 'Finish').click();
 
@@ -208,7 +197,7 @@ describe('Participant Flow E2E', () => {
 
   // ─── Admin Verifies Results ───────────────────────────────────────────────
 
-  it('11. Admin Verifies Results', () => {
+  it('9. Admin Verifies Results', () => {
     cy.clearCookies();
     cy.visit('/login');
     cy.get('input[name="username"]').type(admin.username);

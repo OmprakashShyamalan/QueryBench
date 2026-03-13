@@ -1,5 +1,5 @@
 // Admin E2E Test — SQL_TRAINING Infrastructure
-// Runs AFTER admin_e2e.cy.js and BEFORE participant_training_e2e.cy.js (alphabetical order).
+// Runs AFTER admin_local.cy.js and BEFORE participant_practice_db.cy.js (alphabetical order).
 //
 // Creates:
 //   • SQL_TRAINING database config (SQL Server auth, not Windows auth)
@@ -10,8 +10,8 @@
 //   • 1 assessment with all 10 questions (mixing both schemas)
 //   • 1 assignment to the freshly-created participant
 //
-// Session data is written to cypress/fixtures/e2e_session_training.json
-// for participant_training_e2e.cy.js to consume.
+// Session data is written to cypress/fixtures/e2e_session_practice.json
+// for participant_practice_db.cy.js to consume.
 //
 // Assessment question order (drives participant test scenarios):
 //   AQ1 — Customer Countries    (sql_store) → wrong-syntax test
@@ -140,7 +140,7 @@ describe('Admin Setup E2E — SQL Training', () => {
 
   before(() => {
     // Write initial fixture; test 5 overwrites it with only the created assessment questions.
-    cy.writeFile('cypress/fixtures/e2e_session_training.json', {
+    cy.writeFile('cypress/fixtures/e2e_session_practice.json', {
       participant,
       assessmentName,
       questions: allQuestions,
@@ -293,7 +293,7 @@ describe('Admin Setup E2E — SQL Training', () => {
       .then(() => {
         assessmentCreated = true;
         // Update fixture with only the questions that made it into the assessment
-        cy.writeFile('cypress/fixtures/e2e_session_training.json', {
+        cy.writeFile('cypress/fixtures/e2e_session_practice.json', {
           participant,
           assessmentName,
           questions: available,

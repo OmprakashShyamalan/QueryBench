@@ -10,7 +10,8 @@ This folder is the single access point for project documentation.
 4. [Security Guide](security.md) - active controls and production hardening notes
 5. [Operations Guide](operations.md) - runbook, troubleshooting, and maintenance tasks
 6. [Release Notes](release-notes.md) - notable updates to the codebase and docs
-7. [Load Test Reports Index](reports/README.md) - where performance report artifacts live
+7. [LTI Integration](LTI_INTEGRATION.md) - LMS launch, mapping, and AGS grade return
+8. [Load Test Reports Index](reports/README.md) - where performance report artifacts live
 
 ## Repository Entrypoints
 

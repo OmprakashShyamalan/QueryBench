@@ -1,17 +1,17 @@
-// Participant E2E Test — SQL_TRAINING Infrastructure
-// Runs AFTER admin_practice_db.cy.js (alphabetical order guarantees this).
+// Participant E2E Test — Contact Module Assessment (CORE_20_1_0208_CLEANUP_BA Infrastructure)
+// Runs AFTER admin_training_e2e.cy.js (alphabetical order guarantees this).
 // Reads participant credentials and assessment details from
-// cypress/fixtures/e2e_session_practice.json.
+// cypress/fixtures/e2e_session_training.json.
 //
 // Scenario coverage across 10 questions:
-//   Q1 — Wrong syntax      : SELCT typo                         → "Query Execution Failed"
-//   Q2 — Correct syntax,   : Wrong projection                   → "Result Mismatch"
+//   Q1 — Wrong syntax      : SELCT typo                          → "Query Execution Failed"
+//   Q2 — Correct syntax,   : Wrong projection                    → "Result Mismatch"
 //        wrong projection
 //   Q3..Q10 — Correct answer queries from fixture                → "Query Correct!"
 // Final: Finish → Confirm → "Assessment Submitted"
 // Epilogue: Admin logs in and verifies the result row appears.
 
-describe('Participant Flow E2E — SQL Training', () => {
+describe('Participant Flow E2E — Contact Module Assessment', () => {
   const admin = { username: 'admin', password: 'admin123' };
 
   const normalizeSql = (value = '') => value.replace(/\r\n/g, '\n').trim();
@@ -23,7 +23,7 @@ describe('Participant Flow E2E — SQL Training', () => {
   let questions;
 
   before(() => {
-    cy.readFile('cypress/fixtures/e2e_session_practice.json').then((data) => {
+    cy.readFile('cypress/fixtures/e2e_session_training.json').then((data) => {
       participant = data.participant;
       assessmentName = data.assessmentName;
       questions = data.questions;

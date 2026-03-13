@@ -32,12 +32,16 @@ const App: React.FC = () => {
   useEffect(() => {
     authApi.me()
       .then(apiUser => {
+        const launchAssignmentId = new URLSearchParams(window.location.search).get('launch_assignment_id');
         setUser({
           id: String(apiUser.id),
           email: apiUser.email,
           name: apiUser.name,
           role: apiUser.role === 'ADMIN' ? Role.ADMIN : Role.PARTICIPANT,
         });
+        if (launchAssignmentId) {
+          setActiveAssessmentId(launchAssignmentId);
+        }
       })
       .catch(() => {
         // No active session — stay on login page

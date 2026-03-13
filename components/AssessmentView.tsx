@@ -528,7 +528,7 @@ const AssessmentView: React.FC<Props> = ({ assessmentId: assignmentId, onExit })
 
           <div className="flex border-b border-gray-100 px-2 shrink-0">
             <button onClick={() => setActiveTab('prompt')} className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 transition-all relative ${activeTab === 'prompt' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>
-              <BookOpen className="w-3.5 h-3.5" /> Prompt {activeTab === 'prompt' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+              <BookOpen className="w-3.5 h-3.5" /> Task {activeTab === 'prompt' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
             </button>
             <button onClick={() => setActiveTab('explorer')} className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 transition-all relative ${activeTab === 'explorer' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>
               <Search className="w-3.5 h-3.5" /> Explorer {activeTab === 'explorer' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}

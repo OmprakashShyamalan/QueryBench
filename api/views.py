@@ -553,6 +553,14 @@ class AttemptViewSet(viewsets.ModelViewSet):
         attempt.assignment.status = 'COMPLETED'
         attempt.assignment.save()
 
+        if attempt.source == 'lms':
+            try:
+                from lti.services import submit_grade_for_attempt
+                submit_grade_for_attempt(attempt, float(score), 100.0)
+                logger.info("grade returned")
+            except Exception as e:
+                logger.error(f"LTI grade return failed for attempt={attempt.id}: {e}", exc_info=True)
+
         return Response({
             'score': float(score),
             'correct': len(correct_question_ids),

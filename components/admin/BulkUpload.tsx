@@ -11,7 +11,7 @@ export const BulkUpload: React.FC<Props> = ({ onUpload, onCancel }) => {
   const [input, setInput] = useState('');
 
   const downloadTemplate = () => {
-    const csv = "title,prompt,difficulty,tags,environment_tag,solution_query\nSample,Desc,EASY,tag1,DB1,SELECT * FROM table ORDER BY id";
+    const csv = "title,assessment_task,difficulty,tags,environment_tag,solution_query\nSample,Describe the assessment task clearly,EASY,tag1,DB1,SELECT * FROM table ORDER BY id";
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');

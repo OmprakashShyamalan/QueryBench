@@ -1,7 +1,7 @@
 // Admin E2E Test
 // Covers the full admin setup flow:
 // Login → Create Participant → Create Infrastructure → Create Questions → Create Assessment → Assign → Logout
-// Session data is written to cypress/fixtures/e2e_session.json for participant_e2e.cy.js to consume.
+// Session data is written to cypress/fixtures/e2e_session.json for participant_local.cy.js to consume.
 
 describe('Admin Setup E2E', () => {
   const admin = { username: 'admin', password: 'admin123' };

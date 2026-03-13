@@ -108,7 +108,21 @@ class Assignment(models.Model):
 
 
 class Attempt(models.Model):
+    SOURCE_CHOICES = [
+        ('standalone', 'Standalone'),
+        ('lms', 'LMS'),
+    ]
+
     assignment = models.ForeignKey(Assignment, on_delete=models.CASCADE, related_name='attempts')
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='standalone')
+    lms_provider = models.ForeignKey('lti.LmsProvider', on_delete=models.SET_NULL, null=True, blank=True)
+    lms_assignment_id = models.CharField(max_length=255, blank=True, default='')
+    lti_context_id = models.CharField(max_length=255, blank=True, default='')
+    lti_user_id = models.CharField(max_length=255, blank=True, default='')
+    lti_resource_link_id = models.CharField(max_length=255, blank=True, default='')
+    lti_ags_endpoint = models.CharField(max_length=500, blank=True, default='')
+    lti_lineitem = models.CharField(max_length=500, blank=True, default='')
+    lti_ags_scope = models.TextField(blank=True, default='')
     started_at = models.DateTimeField(auto_now_add=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)

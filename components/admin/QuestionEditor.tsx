@@ -55,20 +55,27 @@ export const QuestionEditor: React.FC<Props> = ({ item, targets, onSave, onCance
 
     const query = solutionQueryRef.current.trim();
     const queryUpper = query.toUpperCase();
-    const dangerous = ['DROP', 'DELETE', 'TRUNCATE', 'ALTER', 'UPDATE', 'INSERT'];
+    const dangerousPatterns = [
+      /\bDROP\s+(TABLE|DATABASE|VIEW|PROCEDURE|FUNCTION|INDEX|SCHEMA)\b/i,
+      /\bDELETE\s+FROM\b/i,
+      /\bTRUNCATE\s+TABLE\b/i,
+      /\bALTER\s+TABLE\b/i,
+      /\bUPDATE\s+\S+\s+SET\b/i,
+      /\bINSERT\s+INTO\b/i,
+    ];
 
     // Static checks first — fast-fail before hitting the DB
-    if (dangerous.some(t => queryUpper.includes(t))) {
+    if (dangerousPatterns.some((pattern) => pattern.test(query))) {
       setStatus({ type: 'error', msg: 'Security violation: DDL/DML tokens detected.' });
       setIsValidating(false);
       return;
     }
-    if (!queryUpper.includes('SELECT')) {
+    if (!/\bSELECT\b/i.test(query)) {
       setStatus({ type: 'error', msg: 'Syntax Error: No valid SELECT projection found.' });
       setIsValidating(false);
       return;
     }
-    if (!queryUpper.includes('ORDER BY')) {
+    if (!/\bORDER\s+BY\b/i.test(query)) {
       setStatus({ type: 'error', msg: 'Determinism Error: ORDER BY is required for deterministic scoring.' });
       setIsValidating(false);
       return;
