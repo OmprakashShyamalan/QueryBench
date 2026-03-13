@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Clock, Database, AlignLeft, ListChecks, Search, Filter } from 'lucide-react';
 import { Assessment, DatabaseConfig, Question } from '../../types';
+import { configMatchesTag, getConfigDisplayName } from '../../utils/databaseConfigs';
 
 interface Props {
   item: Partial<Assessment>;
@@ -15,13 +16,14 @@ export const AssessmentEditor: React.FC<Props> = ({ item, targets, questions, on
   const [editingItem, setEditingItem] = useState<Partial<Assessment>>(item);
   const [filterText, setFilterText] = useState('');
 
-  const selectedDb = (editingItem.db_config as any)?.database_name as string | undefined;
+  const selectedConfig = editingItem.db_config;
+  const selectedDb = getConfigDisplayName(selectedConfig);
 
   const filteredQuestions = questions
     .filter(q => {
-      if (!selectedDb) return true;
+      if (!selectedConfig) return true;
       const tag: string = (q as any).expected_schema_ref || (q as any).environment_tag || '';
-      return tag === selectedDb;
+      return configMatchesTag(selectedConfig, tag);
     })
     .filter(q =>
       filterText === '' ||
@@ -71,7 +73,7 @@ export const AssessmentEditor: React.FC<Props> = ({ item, targets, questions, on
             className="w-full p-3 bg-blue-50 border border-blue-200 rounded-xl outline-none text-blue-700 font-bold"
           >
             <option value="">Select Target...</option>
-            {targets.map(t => <option key={t.database_name} value={t.database_name}>{t.database_name}</option>)}
+            {targets.map(t => <option key={`${t.id}-${t.database_name}`} value={t.database_name}>{getConfigDisplayName(t)}</option>)}
           </select>
         </div>
       </div>

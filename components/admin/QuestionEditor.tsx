@@ -6,6 +6,7 @@ import CodeMirror from '@uiw/react-codemirror';
 import { sql } from '@codemirror/lang-sql';
 import { EditorView } from '@codemirror/view';
 import { attemptsApi } from '../../services/api';
+import { findConfigByTag, getConfigDisplayName } from '../../utils/databaseConfigs';
 
 const JOB_POLL_INTERVAL_MS = 700;
 const JOB_POLL_TIMEOUT_MS = 120000;
@@ -43,6 +44,7 @@ export const QuestionEditor: React.FC<Props> = ({ item, targets, onSave, onCance
   const [editingItem, setEditingItem] = useState(item || { difficulty: 'EASY', tags: [], solution_query: '', order_sensitive: false });
   const [status, setStatus] = useState<{ type: 'idle' | 'validating' | 'success' | 'error', msg?: string }>({ type: 'idle' });
   const [isValidating, setIsValidating] = useState(false);
+  const selectedConfig = findConfigByTag(targets, editingItem.environment_tag);
   // Ref always holds the latest query value; avoids reading stale closure state
   // when validateSQL is called immediately after fast Cypress typing (delay:0).
   const solutionQueryRef = useRef<string>(item?.solution_query || '');
@@ -74,7 +76,7 @@ export const QuestionEditor: React.FC<Props> = ({ item, targets, onSave, onCance
 
     // Resolve the selected target database config
     // Note: AdminDashboard maps the API id to _id, so use _id with fallback to id
-    const config = targets.find(t => t.database_name === editingItem.environment_tag);
+    const config = findConfigByTag(targets, editingItem.environment_tag);
     if (!config) {
       setStatus({ type: 'error', msg: 'Select a target database environment before validating.' });
       setIsValidating(false);
@@ -117,11 +119,11 @@ export const QuestionEditor: React.FC<Props> = ({ item, targets, onSave, onCance
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Target Database Environment</label>
             <select 
               name="environment_tag"
-              value={editingItem.environment_tag || ''} 
+              value={selectedConfig?.database_name || editingItem.environment_tag || ''} 
               onChange={e => setEditingItem({...editingItem, environment_tag: e.target.value})}
               className="w-full p-3 bg-blue-50 border border-blue-200 rounded-xl outline-none text-blue-700 font-bold text-sm"
             >
-              {targets.map(t => <option key={t.database_name} value={t.database_name}>{t.database_name}</option>)}
+              {targets.map(t => <option key={`${t.id}-${t.database_name}`} value={t.database_name}>{getConfigDisplayName(t)}</option>)}
             </select>
           </div>
 
@@ -172,13 +174,13 @@ export const QuestionEditor: React.FC<Props> = ({ item, targets, onSave, onCance
 
           <div>
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-              <Code className="w-3 h-3" /> Prompt Instructions
+              <Code className="w-3 h-3" /> Assessment Task
             </label>
             <textarea 
               name="prompt"
               value={editingItem.prompt || ''} 
               onChange={e => setEditingItem({...editingItem, prompt: e.target.value})}
-              placeholder="Provide clear instructions for the participant..."
+              placeholder="Describe the assessment task clearly for the participant..."
               className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl h-48 outline-none text-sm leading-relaxed"
             />
           </div>
@@ -232,7 +234,10 @@ export const QuestionEditor: React.FC<Props> = ({ item, targets, onSave, onCance
       <div className="flex gap-4 pt-6 border-t border-slate-100">
         <button onClick={onCancel} className="flex-1 py-3.5 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition">Cancel</button>
         <button 
-          onClick={() => onSave(editingItem)} 
+          onClick={() => onSave({
+            ...editingItem,
+            environment_tag: selectedConfig?.database_name || editingItem.environment_tag,
+          })} 
           className="flex-[2] py-3.5 bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition shadow-xl active:scale-95"
         >
           {item?.id ? 'Update Master Library' : 'Create New Question'}

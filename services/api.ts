@@ -68,6 +68,8 @@ export interface ApiDatabaseConfig {
   username: string;
   password_secret_ref: string;
   provider: 'SQL_SERVER' | 'POSTGRES' | 'SQLITE';
+  default_schema?: string;
+  schema_filter?: string;
 }
 
 export interface ApiQuestion {

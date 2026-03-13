@@ -20,6 +20,7 @@ import {
   ApiDatabaseConfig, ApiQuestion, ApiAssessment, ApiAssignment, ApiResult, ApiParticipant,
 } from '../../services/api';
 import { Download } from 'lucide-react';
+import { getConfigDisplayName, getConfigDisplayTag } from '../../utils/databaseConfigs';
 
 // ─── Mappers: API response → frontend types ──────────────────────────────────
 
@@ -30,7 +31,9 @@ type AssignmentRow = Assignment & { _id: number; user_name: string; user_email: 
 
 function mapConfig(c: ApiDatabaseConfig): ConfigWithId {
   return {
+    id: c.id,
     _id: c.id,
+    config_name: c.config_name,
     host: c.host,
     port: c.port,
     database_name: c.database_name,
@@ -38,10 +41,12 @@ function mapConfig(c: ApiDatabaseConfig): ConfigWithId {
     username: c.username,
     password_secret_ref: c.password_secret_ref,
     provider: c.provider,
+    default_schema: c.default_schema ?? 'dbo',
+    schema_filter: c.schema_filter ?? '',
   };
 }
 
-function mapQuestion(q: ApiQuestion): QuestionWithId {
+function mapQuestion(q: ApiQuestion, configs: ConfigWithId[]): QuestionWithId {
   return {
     _id: q.id,
     id: String(q.id),
@@ -49,7 +54,7 @@ function mapQuestion(q: ApiQuestion): QuestionWithId {
     prompt: q.prompt,
     difficulty: q.difficulty,
     tags: q.tags ?? [],
-    environment_tag: q.expected_schema_ref ?? '',
+    environment_tag: getConfigDisplayTag(configs, q.expected_schema_ref),
     expected_schema_ref: q.expected_schema_ref ?? '',
     solution_query: q.solution_query,
     valid: q.is_validated,
@@ -70,13 +75,13 @@ function mapAssessment(a: ApiAssessment, configs: ConfigWithId[], allQuestions: 
     attempts_allowed: a.attempts_allowed,
     is_published: a.is_published,
     questions: linkedQs,
-    db_config: cfg ?? { host: '', port: 1433, database_name: '', username: '', password_secret_ref: '', provider: 'SQL_SERVER', default_schema: 'dbo', schema_filter: '' },
+    db_config: cfg ?? { id: 0, config_name: '', host: '', port: 1433, database_name: '', username: '', password_secret_ref: '', provider: 'SQL_SERVER', default_schema: 'dbo', schema_filter: '' },
   };
 }
 
 function mapAssignment(a: ApiAssignment, assessments: AssessmentWithId[]): AssignmentRow {
   const assessment = assessments.find(as => as._id === a.assessment)
-    ?? { _id: a.assessment, id: String(a.assessment), name: a.assessment_name, description: '', duration_minutes: 0, attempts_allowed: 1, is_published: false, questions: [], db_config: { host: '', port: 1433, database_name: '', username: '', password_secret_ref: '', provider: 'SQL_SERVER' as const, default_schema: 'dbo', schema_filter: '' } };
+    ?? { _id: a.assessment, id: String(a.assessment), name: a.assessment_name, description: '', duration_minutes: 0, attempts_allowed: 1, is_published: false, questions: [], db_config: { id: 0, config_name: '', host: '', port: 1433, database_name: '', username: '', password_secret_ref: '', provider: 'SQL_SERVER' as const, default_schema: 'dbo', schema_filter: '' } };
   return {
     _id: a.id,
     id: String(a.id),
@@ -117,7 +122,7 @@ const AdminDashboard: React.FC = () => {
         usersApi.list(),
       ]);
       const mappedCfgs = cfgs.map(mapConfig);
-      const mappedQs = qs.map(mapQuestion);
+      const mappedQs = qs.map(q => mapQuestion(q, mappedCfgs));
       const mappedAs = as.map(a => mapAssessment(a, mappedCfgs, mappedQs));
       const mappedAsgns = asgns.map(a => mapAssignment(a, mappedAs));
       setTargets(mappedCfgs);
@@ -241,7 +246,7 @@ const AdminDashboard: React.FC = () => {
   // ─── Infrastructure handlers ────────────────────────────────────────────
 
   const handleDeleteTarget = async (t: ConfigWithId) => {
-    if (!window.confirm(`Delete "${t.database_name}"? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete "${getConfigDisplayName(t)}"? This cannot be undone.`)) return;
     try {
       await configsApi.delete(t._id);
       await loadAll();
@@ -644,7 +649,7 @@ const AdminDashboard: React.FC = () => {
               });
               await Promise.all(rows.map((r) => questionsApi.create({
                 title: r.title,
-                prompt: r.prompt,
+                prompt: r.assessment_task || r.prompt,
                 difficulty: ((r.difficulty?.toUpperCase() || 'EASY') as 'EASY' | 'MEDIUM' | 'HARD'),
                 tags: (r.tags || '').split(';').map((t: string) => t.trim()).filter(Boolean),
                 expected_schema_ref: r.environment_tag || '',
@@ -729,7 +734,7 @@ const AdminDashboard: React.FC = () => {
               className="w-full p-3 bg-blue-50 border border-blue-200 rounded-xl outline-none font-bold text-blue-700 text-sm"
             >
               <option value="">Select Target...</option>
-              {targets.map(t => <option key={t.database_name} value={t.database_name}>{t.database_name}</option>)}
+              {targets.map(t => <option key={`${t._id}-${t.database_name}`} value={t.database_name}>{getConfigDisplayName(t)}</option>)}
             </select>
           </div>
           <div className="flex gap-4">

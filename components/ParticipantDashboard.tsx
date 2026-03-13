@@ -22,14 +22,18 @@ function mapAssignment(a: ApiAssignment): Assignment {
       is_published: detail?.is_published ?? true,
       db_config: detail?.db_config_detail
         ? {
+            id: detail.db_config_detail.id,
+            config_name: detail.db_config_detail.config_name,
             host: detail.db_config_detail.host,
             port: detail.db_config_detail.port,
             database_name: detail.db_config_detail.database_name,
             username: detail.db_config_detail.username,
             password_secret_ref: detail.db_config_detail.password_secret_ref,
             provider: detail.db_config_detail.provider,
+            default_schema: detail.db_config_detail.default_schema ?? 'dbo',
+            schema_filter: detail.db_config_detail.schema_filter ?? '',
           }
-        : { host: '', port: 1433, database_name: '', username: '', password_secret_ref: '', provider: 'SQL_SERVER' },
+        : { id: 0, config_name: '', host: '', port: 1433, database_name: '', username: '', password_secret_ref: '', provider: 'SQL_SERVER', default_schema: 'dbo', schema_filter: '' },
     },
     participant_id: String(a.user),
     due_date: a.due_date,

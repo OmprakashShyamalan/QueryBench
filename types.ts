@@ -35,6 +35,7 @@ export interface SchemaMetadata {
 
 export interface DatabaseConfig {
   id: number;
+  config_name?: string;
   host: string;
   port: number;
   database_name: string;

@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Plus, Clock, ListChecks, Server, Settings, Trash2, CheckSquare, Square } from 'lucide-react';
 import { Assessment } from '../../../types';
+import { getConfigDisplayName } from '../../../utils/databaseConfigs';
 
 interface Props {
   assessments: Assessment[];
@@ -86,7 +87,7 @@ export const AssessmentsTab: React.FC<Props> = ({ assessments, onAdd, onEdit, on
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
                     <Server className="w-4 h-4 text-slate-400" />
-                    <span className="text-xs font-bold text-slate-600">{a.db_config?.database_name}</span>
+                    <span className="text-xs font-bold text-slate-600">{getConfigDisplayName(a.db_config)}</span>
                   </div>
                 </td>
                 <td className="px-6 py-4 text-right">
